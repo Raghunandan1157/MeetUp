@@ -5,6 +5,11 @@ const fs = require('fs');
 const { WebSocketServer } = require('ws');
 const path = require('path');
 const crypto = require('crypto');
+const multer = require('multer');
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('ffmpeg-static');
+
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 const app = express();
 
@@ -26,8 +31,118 @@ if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
 
 const wss = new WebSocketServer({ server });
 
+// Body parsing
+app.use(express.json({ limit: '10mb' }));
+
 // Serve static files from public/
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Temp directory for uploads
+const uploadDir = path.join(__dirname, 'tmp');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+
+const upload = multer({ dest: uploadDir, limits: { fileSize: 500 * 1024 * 1024 } });
+
+// ===== API: Convert WebM to MP4 =====
+app.post('/api/convert', upload.single('video'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No video file uploaded' });
+
+  const inputPath = req.file.path;
+  const outputPath = inputPath + '.mp4';
+
+  ffmpeg(inputPath)
+    .outputOptions(['-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart'])
+    .output(outputPath)
+    .on('end', () => {
+      res.download(outputPath, `MeetUp-Recording-${Date.now()}.mp4`, () => {
+        // Clean up temp files
+        fs.unlink(inputPath, () => {});
+        fs.unlink(outputPath, () => {});
+      });
+    })
+    .on('error', (err) => {
+      console.error('FFmpeg conversion error:', err.message);
+      fs.unlink(inputPath, () => {});
+      res.status(500).json({ error: 'Conversion failed' });
+    })
+    .run();
+});
+
+// ===== API: Generate Meeting Minutes (Mistral AI) =====
+app.post('/api/generate-minutes', async (req, res) => {
+  const { transcript, meetingCode, duration } = req.body;
+  if (!transcript || transcript.trim().length === 0) {
+    return res.status(400).json({ error: 'No transcript provided' });
+  }
+
+  const apiKey = process.env.MISTRAL_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'MISTRAL_API_KEY not configured on server' });
+  }
+
+  try {
+    const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'mistral-large-latest',
+        max_tokens: 4096,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a meeting minutes assistant. Generate concise, professional, and actionable meeting minutes from transcripts.'
+          },
+          {
+            role: 'user',
+            content: `Analyze the following meeting transcript and generate structured meeting minutes.
+
+Meeting Code: ${meetingCode || 'N/A'}
+Duration: ${duration || 'N/A'}
+
+TRANSCRIPT:
+${transcript}
+
+Generate meeting minutes in the following format:
+
+## Meeting Summary
+A brief 2-3 sentence summary of what was discussed.
+
+## Key Discussion Points
+- Bullet points of main topics discussed
+
+## Decisions Made
+- Any decisions that were agreed upon
+
+## Action Items
+| # | Action Item | Owner | Deadline |
+|---|------------|-------|----------|
+| 1 | Description | Person | Date |
+
+## Follow-up Items
+- Items that need further discussion or follow-up
+
+Keep the minutes concise, professional, and actionable. If the transcript is short or unclear, do your best to extract meaningful information. If no clear deadlines were mentioned, suggest reasonable ones.`
+          }
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      throw new Error(`Mistral API error ${response.status}: ${errBody}`);
+    }
+
+    const data = await response.json();
+    const minutesText = data.choices[0].message.content;
+    res.json({ minutes: minutesText });
+  } catch (err) {
+    console.error('Mistral API error:', err.message);
+    res.status(500).json({ error: 'Failed to generate minutes: ' + err.message });
+  }
+});
 
 // rooms: Map<roomId, Map<peerId, WebSocket>>
 const rooms = new Map();

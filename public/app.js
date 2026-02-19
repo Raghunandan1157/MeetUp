@@ -162,6 +162,9 @@ if (isRoom) {
   let recordedChunks = [];
   let isRecording = false;
   let recordingStream = null;
+  let speechRecognition = null;
+  let isTranscribing = false;
+  let transcriptLines = [];
 
   // DOM Elements
   const videoGrid = document.getElementById('video-grid');
@@ -183,6 +186,15 @@ if (isRoom) {
   const chatMessages = document.getElementById('chat-messages');
   const chatInput = document.getElementById('chat-input');
   const sendChatBtn = document.getElementById('send-chat-btn');
+
+  // Minutes panel DOM
+  const minutesPanel = document.getElementById('minutes-panel');
+  const closeMinutesBtn = document.getElementById('close-minutes');
+  const toggleMinutesBtn = document.getElementById('toggle-minutes');
+  const toggleTranscriptionBtn = document.getElementById('toggle-transcription');
+  const transcriptContent = document.getElementById('transcript-content');
+  const generateMinutesBtn = document.getElementById('generate-minutes-btn');
+  const generatedMinutes = document.getElementById('generated-minutes');
 
   // Hide screen share button on mobile (getDisplayMedia not supported)
   if (isMobile && shareScreenBtn) {
@@ -632,6 +644,11 @@ if (isRoom) {
   toggleChatBtn.addEventListener('click', () => {
     chatPanel.classList.toggle('open');
     toggleChatBtn.classList.toggle('active');
+    // Close minutes if open
+    if (chatPanel.classList.contains('open')) {
+      minutesPanel.classList.remove('open');
+      toggleMinutesBtn.classList.remove('active');
+    }
   });
 
   closeChatBtn.addEventListener('click', () => {
@@ -732,20 +749,50 @@ if (isRoom) {
     showToast('Recording stopped — downloading file');
   }
 
-  function downloadRecording() {
+  async function downloadRecording() {
     if (recordedChunks.length === 0) return;
 
     const blob = new Blob(recordedChunks, { type: 'video/webm' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    a.download = `MeetUp-Recording-${timestamp}.webm`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
     recordedChunks = [];
+
+    showToast('Converting to MP4...');
+
+    try {
+      const formData = new FormData();
+      formData.append('video', blob, 'recording.webm');
+
+      const response = await fetch('/api/convert', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Conversion failed');
+
+      const mp4Blob = await response.blob();
+      const url = URL.createObjectURL(mp4Blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      a.download = `MeetUp-Recording-${timestamp}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('MP4 recording downloaded!');
+    } catch (err) {
+      console.error('MP4 conversion failed, falling back to WebM:', err);
+      // Fallback: download as WebM
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      a.download = `MeetUp-Recording-${timestamp}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Downloaded as WebM (MP4 conversion unavailable)');
+    }
   }
 
   recordBtn.addEventListener('click', () => {
@@ -780,6 +827,11 @@ if (isRoom) {
 
   function leaveMeeting() {
     intentionalLeave = true;
+
+    // Stop transcription
+    if (isTranscribing) {
+      stopTranscription();
+    }
 
     // Auto-stop recording and download before leaving
     if (isRecording) {
@@ -859,6 +911,217 @@ if (isRoom) {
   chatInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') sendChatMessage();
   });
+
+  // ===== Minutes Panel =====
+  toggleMinutesBtn.addEventListener('click', () => {
+    minutesPanel.classList.toggle('open');
+    toggleMinutesBtn.classList.toggle('active');
+    // Close chat if open
+    if (minutesPanel.classList.contains('open')) {
+      chatPanel.classList.remove('open');
+      toggleChatBtn.classList.remove('active');
+    }
+  });
+
+  closeMinutesBtn.addEventListener('click', () => {
+    minutesPanel.classList.remove('open');
+    toggleMinutesBtn.classList.remove('active');
+  });
+
+  // ===== Live Transcription (Web Speech API) =====
+  function startTranscription() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      showToast('Speech recognition not supported in this browser');
+      return;
+    }
+
+    speechRecognition = new SpeechRecognition();
+    speechRecognition.continuous = true;
+    speechRecognition.interimResults = true;
+    speechRecognition.lang = 'en-US';
+
+    // Clear empty state
+    const emptyEl = transcriptContent.querySelector('.transcript-empty');
+    if (emptyEl) emptyEl.remove();
+
+    speechRecognition.onresult = (event) => {
+      let interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          const text = result[0].transcript.trim();
+          if (text) {
+            const now = new Date();
+            const ts = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            transcriptLines.push({ time: ts, text });
+            addTranscriptLine(ts, text);
+          }
+        } else {
+          interimTranscript += result[0].transcript;
+        }
+      }
+      // Show interim text
+      let interimEl = transcriptContent.querySelector('.transcript-interim');
+      if (interimTranscript) {
+        if (!interimEl) {
+          interimEl = document.createElement('div');
+          interimEl.className = 'transcript-line transcript-interim';
+          interimEl.style.opacity = '0.5';
+          interimEl.style.fontStyle = 'italic';
+          transcriptContent.appendChild(interimEl);
+        }
+        interimEl.textContent = interimTranscript;
+        transcriptContent.scrollTop = transcriptContent.scrollHeight;
+      } else if (interimEl) {
+        interimEl.remove();
+      }
+    };
+
+    speechRecognition.onerror = (event) => {
+      console.warn('Speech recognition error:', event.error);
+      if (event.error === 'not-allowed') {
+        showToast('Microphone access denied for transcription');
+        stopTranscription();
+      }
+    };
+
+    speechRecognition.onend = () => {
+      // Auto-restart if still transcribing (it stops on silence)
+      if (isTranscribing) {
+        try { speechRecognition.start(); } catch (e) {}
+      }
+    };
+
+    speechRecognition.start();
+    isTranscribing = true;
+    toggleTranscriptionBtn.classList.add('active');
+    toggleTranscriptionBtn.querySelector('.material-icons').textContent = 'stop';
+    showToast('Live transcription started');
+  }
+
+  function stopTranscription() {
+    if (speechRecognition) {
+      isTranscribing = false;
+      speechRecognition.stop();
+      speechRecognition = null;
+    }
+    toggleTranscriptionBtn.classList.remove('active');
+    toggleTranscriptionBtn.querySelector('.material-icons').textContent = 'play_arrow';
+  }
+
+  function addTranscriptLine(time, text) {
+    // Remove interim element if exists
+    const interimEl = transcriptContent.querySelector('.transcript-interim');
+    if (interimEl) interimEl.remove();
+
+    const line = document.createElement('div');
+    line.className = 'transcript-line';
+    line.innerHTML = `<span class="ts">[${escapeHtml(time)}]</span> ${escapeHtml(text)}`;
+    transcriptContent.appendChild(line);
+    transcriptContent.scrollTop = transcriptContent.scrollHeight;
+  }
+
+  toggleTranscriptionBtn.addEventListener('click', () => {
+    if (!isTranscribing) {
+      startTranscription();
+    } else {
+      stopTranscription();
+    }
+  });
+
+  // ===== Generate AI Minutes =====
+  generateMinutesBtn.addEventListener('click', async () => {
+    if (transcriptLines.length === 0) {
+      showToast('No transcript available. Start transcription first.');
+      return;
+    }
+
+    // Build transcript text
+    const transcriptText = transcriptLines
+      .map(l => `[${l.time}] ${l.text}`)
+      .join('\n');
+
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    const duration = `${mins}m ${secs}s`;
+
+    // Show loading
+    generatedMinutes.innerHTML = `
+      <div class="minutes-loading">
+        <div class="spinner"></div>
+        Generating minutes with AI...
+      </div>
+    `;
+    generateMinutesBtn.disabled = true;
+
+    try {
+      const response = await fetch('/api/generate-minutes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript: transcriptText,
+          meetingCode: roomId,
+          duration,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate minutes');
+      }
+
+      // Render markdown-like content
+      generatedMinutes.innerHTML = renderMinutes(data.minutes);
+      showToast('Meeting minutes generated!');
+    } catch (err) {
+      console.error('Minutes generation failed:', err);
+      generatedMinutes.innerHTML = `
+        <div class="minutes-empty">
+          <span class="material-icons" style="color:var(--red)">error</span>
+          <p>${escapeHtml(err.message)}</p>
+        </div>
+      `;
+      showToast('Failed to generate minutes');
+    }
+
+    generateMinutesBtn.disabled = false;
+  });
+
+  // Simple markdown-to-HTML renderer for minutes
+  function renderMinutes(text) {
+    return text
+      // Headers
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      // Bold
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      // Tables
+      .replace(/^\|(.+)\|$/gm, (match) => {
+        const cells = match.split('|').filter(c => c.trim() !== '');
+        const isHeader = cells.every(c => /^[\s-:]+$/.test(c));
+        if (isHeader) return ''; // separator row
+        const tag = 'td';
+        const row = cells.map(c => `<${tag}>${c.trim()}</${tag}>`).join('');
+        return `<tr>${row}</tr>`;
+      })
+      // Wrap consecutive tr rows in table
+      .replace(/((<tr>.*<\/tr>\n?)+)/g, '<table>$1</table>')
+      // Make first row headers
+      .replace(/<table><tr>(.*?)<\/tr>/g, (match, row) => {
+        const headerRow = row.replace(/<td>/g, '<th>').replace(/<\/td>/g, '</th>');
+        return `<table><tr>${headerRow}</tr>`;
+      })
+      // Bullet points
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
+      .replace(/((<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
+      // Paragraphs (lines that aren't already wrapped)
+      .replace(/^(?!<[hultdp]|<\/|<tr|<table)(.+)$/gm, '<p>$1</p>')
+      // Clean up empty paragraphs
+      .replace(/<p>\s*<\/p>/g, '');
+  }
 
   // ===== Handle page visibility =====
   // When phone locks or tab goes background, streams can pause

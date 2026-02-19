@@ -47,6 +47,45 @@
     </div>
   </main>
 
+  <!-- Minutes Side Panel -->
+  <aside id="minutes-panel" class="minutes-panel">
+    <div class="chat-header">
+      <h3>Meeting Minutes</h3>
+      <button id="close-minutes" class="icon-btn" title="Close minutes">
+        <span class="material-icons">close</span>
+      </button>
+    </div>
+    <div class="minutes-body">
+      <div id="transcript-section" class="transcript-section">
+        <div class="transcript-header">
+          <span class="material-icons" style="font-size:18px">mic</span>
+          <span>Live Transcript</span>
+          <button id="toggle-transcription" class="transcript-toggle-btn" title="Start transcription">
+            <span class="material-icons">play_arrow</span>
+          </button>
+        </div>
+        <div id="transcript-content" class="transcript-content">
+          <div class="transcript-empty">
+            <span class="material-icons">subtitles</span>
+            <p>Click play to start live transcription. Speech will be captured and transcribed in real-time.</p>
+          </div>
+        </div>
+      </div>
+      <div id="generated-minutes" class="generated-minutes">
+        <div class="minutes-empty">
+          <span class="material-icons">description</span>
+          <p>AI-generated meeting minutes will appear here after you click "Generate Minutes".</p>
+        </div>
+      </div>
+    </div>
+    <div class="minutes-actions">
+      <button id="generate-minutes-btn" class="btn btn-primary" style="padding:10px 20px; font-size:13px;">
+        <span class="material-icons" style="font-size:18px">auto_awesome</span>
+        Generate Minutes
+      </button>
+    </div>
+  </aside>
+
   <!-- Chat Side Panel -->
   <aside id="chat-panel" class="chat-panel">
     <div class="chat-header">
@@ -85,6 +124,9 @@
       </div>
       <button id="record-btn" class="control-btn" title="Record meeting">
         <span class="material-icons">fiber_manual_record</span>
+      </button>
+      <button id="toggle-minutes" class="control-btn" title="Meeting minutes">
+        <span class="material-icons">description</span>
       </button>
       <button id="toggle-chat" class="control-btn" title="Toggle chat">
         <span class="material-icons">chat</span>
