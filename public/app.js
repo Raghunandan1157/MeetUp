@@ -950,7 +950,9 @@ if (isRoom) {
   const manualTranscriptInput = document.getElementById('manual-transcript-input');
   const addManualNoteBtn = document.getElementById('add-manual-note');
   let speechRecognitionRetries = 0;
+  let micDeniedRetries = 0;
   const MAX_SPEECH_RETRIES = 3;
+  const MAX_MIC_DENIED_RETRIES = 3;
 
   // Check browser support upfront
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1013,6 +1015,7 @@ if (isRoom) {
       speechRecognition.onstart = () => {
         console.log('Speech recognition started, lang:', lang);
         speechRecognitionRetries = 0;
+        micDeniedRetries = 0;
         setTranscriptionStatus('Listening...', 'listening');
         showBanner(true);
       };
@@ -1062,10 +1065,22 @@ if (isRoom) {
         switch (event.error) {
           case 'not-allowed':
           case 'service-not-allowed':
-            showToast('Microphone access denied — check browser permissions');
-            setTranscriptionStatus('Mic denied', 'error');
-            stopTranscription();
-            break;
+            micDeniedRetries++;
+            if (micDeniedRetries <= MAX_MIC_DENIED_RETRIES) {
+              console.warn(`Speech mic denied (attempt ${micDeniedRetries}/${MAX_MIC_DENIED_RETRIES}) — retrying`);
+              setTranscriptionStatus('Mic busy, retrying...', 'listening');
+              setTimeout(() => {
+                if (isTranscribing) {
+                  stopTranscription();
+                  startTranscription();
+                }
+              }, 3000);
+            } else {
+              showToast('Transcription unavailable — use manual notes instead');
+              setTranscriptionStatus('Use manual notes', 'error');
+              stopTranscription();
+            }
+            return;
           case 'no-speech':
             setTranscriptionStatus('No speech detected...', 'listening');
             break;
@@ -1305,12 +1320,22 @@ if (isRoom) {
     connectWebSocket();
     updateGridLayout();
 
-    // Auto-start transcription after mic has settled (avoid conflict with getUserMedia)
+    // Auto-start transcription only after mic is confirmed working
     if (speechSupported) {
-      setTimeout(() => {
-        startTranscription();
-        showToast('Transcription auto-started — select your language in the minutes panel');
-      }, 4000);
+      const waitForMic = () => {
+        if (localStream && localStream.getAudioTracks().length > 0 && localStream.getAudioTracks()[0].enabled) {
+          // Mic is ready — start transcription after a settle delay
+          setTimeout(() => {
+            startTranscription();
+          }, 2000);
+        } else {
+          // Mic not ready yet — retry in 2s, give up after 15s
+          if (Date.now() - startTime < 15000) {
+            setTimeout(waitForMic, 2000);
+          }
+        }
+      };
+      setTimeout(waitForMic, 3000);
     }
   }
 
