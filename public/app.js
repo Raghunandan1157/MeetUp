@@ -5,6 +5,9 @@ const ICE_SERVERS = [
   { urls: 'stun:stun1.l.google.com:19302' },
 ];
 
+// ===== Mobile Detection =====
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 // ===== Shared State =====
 let localStream = null;
 let micEnabled = true;
@@ -30,6 +33,18 @@ function showToast(message) {
   setTimeout(() => toast.classList.remove('show'), 2500);
 }
 
+// Safe play helper — handles autoplay restrictions on mobile
+function safePlay(videoEl) {
+  if (!videoEl) return;
+  const playPromise = videoEl.play();
+  if (playPromise !== undefined) {
+    playPromise.catch(() => {
+      // Autoplay blocked — retry on first user interaction
+      document.addEventListener('click', () => videoEl.play(), { once: true });
+    });
+  }
+}
+
 // ===== Detect which page we are on =====
 const isLobby = document.body.classList.contains('lobby-page');
 const isRoom = document.body.classList.contains('room-page');
@@ -51,6 +66,7 @@ if (isLobby) {
     try {
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       previewVideo.srcObject = localStream;
+      safePlay(previewVideo);
       previewPlaceholder.classList.add('hidden');
     } catch (err) {
       console.warn('Could not access camera/mic:', err.message);
@@ -135,11 +151,13 @@ if (isRoom) {
   // State
   let myPeerId = null;
   let ws = null;
-  let peers = {}; // peerId -> { pc: RTCPeerConnection, stream: MediaStream }
+  let peers = {}; // peerId -> { pc, stream, iceCandidateBuffer }
   let isScreenSharing = false;
   let originalVideoTrack = null;
   let startTime = Date.now();
   let timerInterval = null;
+  let wsReconnectTimer = null;
+  let intentionalLeave = false;
 
   // DOM Elements
   const videoGrid = document.getElementById('video-grid');
@@ -160,6 +178,11 @@ if (isRoom) {
   const chatInput = document.getElementById('chat-input');
   const sendChatBtn = document.getElementById('send-chat-btn');
 
+  // Hide screen share button on mobile (getDisplayMedia not supported)
+  if (isMobile && shareScreenBtn) {
+    shareScreenBtn.style.display = 'none';
+  }
+
   // Set meeting code display
   meetingCodeEl.textContent = roomId;
 
@@ -178,9 +201,9 @@ if (isRoom) {
     participantCountEl.textContent = count;
   }
 
-  // Update video grid layout
+  // Update video grid layout — count actual .video-tile elements
   function updateGridLayout() {
-    const tileCount = videoGrid.children.length;
+    const tileCount = videoGrid.querySelectorAll('.video-tile').length;
     videoGrid.className = 'video-grid';
 
     if (tileCount <= 1) videoGrid.classList.add('grid-1');
@@ -190,11 +213,17 @@ if (isRoom) {
     else videoGrid.classList.add('grid-many');
   }
 
+  // Generate display name from peer ID
+  function peerDisplayName(peerId) {
+    return 'User ' + peerId.substring(0, 4).toUpperCase();
+  }
+
   // ===== Get Local Media =====
   async function getLocalMedia() {
     try {
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localVideo.srcObject = localStream;
+      safePlay(localVideo);
 
       // Apply initial mic/cam state from lobby
       micEnabled = initialMic;
@@ -225,12 +254,19 @@ if (isRoom) {
   function createPeerConnection(remotePeerId) {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
+    // Create remote stream and tile FIRST, before any events can fire
+    const remoteStream = new MediaStream();
+    createRemoteTile(remotePeerId, remoteStream);
+
     // Add local tracks
     if (localStream) {
       localStream.getTracks().forEach(track => {
         pc.addTrack(track, localStream);
       });
     }
+
+    // ICE candidate buffer — queue candidates until remote description is set
+    const iceCandidateBuffer = [];
 
     // Handle ICE candidates
     pc.onicecandidate = (event) => {
@@ -243,14 +279,28 @@ if (isRoom) {
       }
     };
 
-    // Handle remote stream
-    const remoteStream = new MediaStream();
+    // Handle remote tracks — tile already exists so videoEl is guaranteed
     pc.ontrack = (event) => {
       remoteStream.addTrack(event.track);
-      // Update the video element if it exists
       const videoEl = document.querySelector(`#tile-${remotePeerId} video`);
       if (videoEl) {
         videoEl.srcObject = remoteStream;
+        safePlay(videoEl);
+      }
+    };
+
+    // Negotiation needed handler
+    pc.onnegotiationneeded = async () => {
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        wsSend({
+          type: 'offer',
+          targetPeerId: remotePeerId,
+          offer: pc.localDescription,
+        });
+      } catch (err) {
+        console.warn('Negotiation needed error:', err);
       }
     };
 
@@ -262,14 +312,27 @@ if (isRoom) {
       }
     };
 
-    peers[remotePeerId] = { pc, stream: remoteStream };
+    peers[remotePeerId] = { pc, stream: remoteStream, iceCandidateBuffer };
 
-    // Create video tile for this peer
-    createRemoteTile(remotePeerId, remoteStream);
     updateParticipantCount();
     updateGridLayout();
 
     return pc;
+  }
+
+  // Flush buffered ICE candidates after remote description is set
+  async function flushIceCandidates(peerId) {
+    const peer = peers[peerId];
+    if (!peer) return;
+    const buffer = peer.iceCandidateBuffer;
+    while (buffer.length > 0) {
+      const candidate = buffer.shift();
+      try {
+        await peer.pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.warn('Failed to add buffered ICE candidate:', err);
+      }
+    }
   }
 
   // ===== Create Remote Video Tile =====
@@ -292,7 +355,7 @@ if (isRoom) {
 
     const name = document.createElement('span');
     name.className = 'tile-name';
-    name.textContent = `Peer ${peerId.substring(0, 6)}`;
+    name.textContent = peerDisplayName(peerId);
 
     const muteIcon = document.createElement('span');
     muteIcon.className = 'tile-mute-icon material-icons';
@@ -305,6 +368,9 @@ if (isRoom) {
     tile.appendChild(video);
     tile.appendChild(overlay);
     videoGrid.appendChild(tile);
+
+    // Ensure playback starts (handles autoplay restriction)
+    safePlay(video);
   }
 
   // ===== Remove Remote Tile =====
@@ -332,6 +398,11 @@ if (isRoom) {
 
     ws.onopen = () => {
       console.log('WebSocket connected');
+      // Clear any pending reconnect timer
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = null;
+      }
       wsSend({ type: 'join', roomId });
     };
 
@@ -342,6 +413,10 @@ if (isRoom) {
 
     ws.onclose = () => {
       console.log('WebSocket disconnected');
+      // Auto-reconnect after 2 seconds unless we left intentionally
+      if (!intentionalLeave) {
+        wsReconnectTimer = setTimeout(() => connectWebSocket(), 2000);
+      }
     };
 
     ws.onerror = (err) => {
@@ -374,14 +449,18 @@ if (isRoom) {
 
       case 'peer-joined':
         console.log(`New peer joined: ${msg.peerId}`);
-        showToast('Someone joined the meeting');
+        showToast(`${peerDisplayName(msg.peerId)} joined the meeting`);
         // Wait for them to send us an offer (they are the newcomer)
         break;
 
       case 'offer': {
         console.log(`Received offer from ${msg.peerId}`);
+        // Create peer connection and tile FIRST
         const pc = createPeerConnection(msg.peerId);
+        // Now set remote description — ontrack may fire here but tile already exists
         await pc.setRemoteDescription(new RTCSessionDescription(msg.offer));
+        // Flush any ICE candidates that arrived before remote description was set
+        await flushIceCandidates(msg.peerId);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         wsSend({
@@ -397,6 +476,8 @@ if (isRoom) {
         const peer = peers[msg.peerId];
         if (peer) {
           await peer.pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
+          // Flush any ICE candidates that arrived before remote description was set
+          await flushIceCandidates(msg.peerId);
         }
         break;
       }
@@ -404,18 +485,27 @@ if (isRoom) {
       case 'ice-candidate': {
         const peer = peers[msg.peerId];
         if (peer) {
-          try {
-            await peer.pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
-          } catch (err) {
-            console.warn('Failed to add ICE candidate:', err);
+          // Buffer candidates if remote description isn't set yet
+          if (!peer.pc.remoteDescription) {
+            peer.iceCandidateBuffer.push(msg.candidate);
+          } else {
+            try {
+              await peer.pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+            } catch (err) {
+              console.warn('Failed to add ICE candidate:', err);
+            }
           }
+        } else {
+          // Peer connection doesn't exist yet — this can happen if ICE arrives before offer
+          // We can't buffer without a peer object, so log and drop
+          console.warn(`ICE candidate received for unknown peer ${msg.peerId}, dropping`);
         }
         break;
       }
 
       case 'peer-left':
         console.log(`Peer left: ${msg.peerId}`);
-        showToast('Someone left the meeting');
+        showToast(`${peerDisplayName(msg.peerId)} left the meeting`);
         removePeer(msg.peerId);
         break;
 
@@ -432,6 +522,9 @@ if (isRoom) {
   // ===== Create Offer =====
   async function createOfferForPeer(peerId) {
     const pc = createPeerConnection(peerId);
+    // Remove the onnegotiationneeded handler for this initial offer
+    // to avoid duplicate offers, since we are creating one explicitly
+    pc.onnegotiationneeded = null;
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     wsSend({
@@ -470,8 +563,10 @@ if (isRoom) {
     toggleCamBtn.querySelector('.material-icons').textContent = camEnabled ? 'videocam' : 'videocam_off';
   });
 
-  // Screen Share
+  // Screen Share — disabled on mobile
   shareScreenBtn.addEventListener('click', async () => {
+    if (isMobile) return;
+
     if (!isScreenSharing) {
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
@@ -490,6 +585,7 @@ if (isRoom) {
 
         // Show screen share in local preview
         localVideo.srcObject = new MediaStream([screenTrack, ...localStream.getAudioTracks()]);
+        safePlay(localVideo);
         document.getElementById('local-tile').classList.add('screen-share');
 
         isScreenSharing = true;
@@ -518,6 +614,7 @@ if (isRoom) {
     }
 
     localVideo.srcObject = localStream;
+    safePlay(localVideo);
     document.getElementById('local-tile').classList.remove('screen-share');
     isScreenSharing = false;
     shareScreenBtn.classList.remove('sharing');
@@ -559,6 +656,14 @@ if (isRoom) {
   });
 
   function leaveMeeting() {
+    intentionalLeave = true;
+
+    // Clear reconnect timer
+    if (wsReconnectTimer) {
+      clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = null;
+    }
+
     // Close all peer connections
     for (const peerId of Object.keys(peers)) {
       peers[peerId].pc.close();
@@ -593,7 +698,7 @@ if (isRoom) {
     msgEl.className = 'chat-message';
 
     const isMe = senderId === myPeerId;
-    const senderName = isMe ? 'You' : `Peer ${senderId.substring(0, 6)}`;
+    const senderName = isMe ? 'You' : peerDisplayName(senderId);
     const time = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     msgEl.innerHTML = `
@@ -627,8 +732,22 @@ if (isRoom) {
     if (e.key === 'Enter') sendChatMessage();
   });
 
+  // ===== Handle page visibility =====
+  // When phone locks or tab goes background, streams can pause
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && localStream) {
+      localVideo.srcObject = localStream;
+      safePlay(localVideo);
+    }
+  });
+
   // ===== Handle page unload =====
   window.addEventListener('beforeunload', () => {
+    intentionalLeave = true;
+    if (wsReconnectTimer) {
+      clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = null;
+    }
     wsSend({ type: 'leave' });
     if (ws) ws.close();
     if (localStream) localStream.getTracks().forEach(t => t.stop());

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
   <title>MeetUp - Meeting Room</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
-<body class="room-page">
+<body class="room-page" style="touch-action: manipulation;">
   <!-- Top Info Bar -->
   <header class="room-header">
     <div class="header-left">
@@ -74,9 +74,11 @@
       <button id="toggle-cam" class="control-btn active" title="Toggle camera">
         <span class="material-icons">videocam</span>
       </button>
-      <button id="share-screen" class="control-btn" title="Share screen">
-        <span class="material-icons">present_to_all</span>
-      </button>
+      <div id="share-screen-wrapper" class="control-btn-wrapper">
+        <button id="share-screen" class="control-btn" title="Share screen">
+          <span class="material-icons">present_to_all</span>
+        </button>
+      </div>
       <button id="toggle-chat" class="control-btn" title="Toggle chat">
         <span class="material-icons">chat</span>
       </button>

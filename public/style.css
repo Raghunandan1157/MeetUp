@@ -28,6 +28,12 @@ html, body {
   background: var(--bg-primary);
   color: var(--text-primary);
   overflow: hidden;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+video {
+  display: block;
 }
 
 button {
@@ -48,6 +54,7 @@ input {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow-y: auto;
 }
 
@@ -304,6 +311,7 @@ input {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
 }
 
 /* Room Header */
@@ -371,6 +379,7 @@ input {
   display: flex;
   overflow: hidden;
   position: relative;
+  min-height: 0;
 }
 
 .video-grid {
@@ -378,6 +387,7 @@ input {
   display: grid;
   gap: 8px;
   padding: 8px;
+  height: 100%;
   transition: all 0.3s ease;
   align-content: center;
   justify-content: center;
@@ -421,6 +431,9 @@ input {
 /* Video Tile */
 .video-tile {
   position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   background: var(--bg-surface);
   border-radius: var(--radius);
   overflow: hidden;
@@ -540,6 +553,11 @@ input {
   color: #1a1a1a;
 }
 
+/* Hide on mobile utility */
+.hide-on-mobile {
+  display: flex;
+}
+
 /* Chat Panel */
 .chat-panel {
   position: absolute;
@@ -596,6 +614,7 @@ input {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .chat-empty {
@@ -720,12 +739,27 @@ input {
 
 /* ===== RESPONSIVE ===== */
 @media (max-width: 768px) {
-  .lobby-card {
-    flex-direction: column;
-    gap: 32px;
+  /* --- Lobby mobile --- */
+  .lobby-page {
+    min-height: 100dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
-  .preview-section,
+  .lobby-card {
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .preview-section {
+    max-width: 100%;
+  }
+
+  .preview-section .video-preview-container {
+    max-width: 320px;
+    margin: 0 auto;
+  }
+
   .lobby-actions {
     max-width: 100%;
   }
@@ -742,38 +776,109 @@ input {
     width: 100%;
   }
 
-  .chat-panel {
-    width: 100%;
-  }
-
-  .video-grid.grid-2,
-  .video-grid.grid-3-4 {
-    grid-template-columns: 1fr;
-  }
-
-  .video-grid.grid-5-6 {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .controls-center {
-    gap: 8px;
-  }
-
-  .control-btn {
-    width: 42px;
-    height: 42px;
-  }
-
-  .control-btn .material-icons {
-    font-size: 22px;
-  }
-
+  /* --- Room page mobile --- */
   .room-header {
     padding: 10px 16px;
   }
 
   .header-center {
     display: none;
+  }
+
+  /* Video area: contain grid within bounds */
+  .video-area {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .video-grid {
+    height: 100%;
+    align-content: stretch;
+  }
+
+  /* Remove aspect-ratio on mobile — let grid control tile size */
+  .video-tile {
+    aspect-ratio: unset;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+  }
+
+  /* grid-1: single column, full space */
+  .video-grid.grid-1 {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
+    height: 100%;
+  }
+
+  /* grid-2: single column, two equal rows */
+  .video-grid.grid-2 {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+    height: 100%;
+  }
+
+  /* grid-3-4: 2x2 */
+  .video-grid.grid-3-4 {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    height: 100%;
+  }
+
+  /* grid-5-6: 2 columns, 3 rows */
+  .video-grid.grid-5-6 {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    height: 100%;
+  }
+
+  /* grid-many: 2 columns auto rows */
+  .video-grid.grid-many {
+    grid-template-columns: 1fr 1fr;
+    height: 100%;
+  }
+
+  /* --- Control bar mobile --- */
+  .control-bar {
+    padding: 10px 12px;
+  }
+
+  .controls-center {
+    gap: 6px;
+  }
+
+  .control-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .control-btn .material-icons {
+    font-size: 20px;
+  }
+
+  .control-btn.leave {
+    width: 48px;
+  }
+
+  /* Hide screen share on mobile */
+  .hide-on-mobile {
+    display: none !important;
+  }
+
+  /* --- Chat panel mobile: full screen overlay --- */
+  .chat-panel {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-left: none;
+    z-index: 50;
+    transform: translateX(100%);
+  }
+
+  .chat-panel.open {
+    transform: translateX(0);
   }
 }
 
@@ -786,7 +891,7 @@ input {
     padding: 16px;
   }
 
-  .video-grid.grid-5-6 {
-    grid-template-columns: 1fr;
+  .preview-section .video-preview-container {
+    max-width: 280px;
   }
 }
