@@ -964,8 +964,32 @@ if (isRoom) {
     toggleTranscriptionBtn.style.display = 'none';
   }
 
+  // Language fallback map: primary -> fallback codes to try
+  const langFallbacks = {
+    'kn-IN': ['kn', 'kn-IN'],
+    'te-IN': ['te', 'te-IN'],
+    'ta-IN': ['ta', 'ta-IN'],
+    'ml-IN': ['ml', 'ml-IN'],
+    'mr-IN': ['mr', 'mr-IN'],
+    'gu-IN': ['gu', 'gu-IN'],
+    'bn-IN': ['bn', 'bn-IN'],
+    'pa-IN': ['pa', 'pa-IN'],
+  };
+  let currentLangAttempt = 0;
+  let langFailCount = 0;
+
   function getSelectedLang() {
     return speechLangSelect ? speechLangSelect.value : 'kn-IN';
+  }
+
+  // Get the actual language code to use (with fallback)
+  function getEffectiveLang() {
+    const selected = getSelectedLang();
+    const fallbacks = langFallbacks[selected];
+    if (fallbacks && currentLangAttempt > 0 && currentLangAttempt < fallbacks.length) {
+      return fallbacks[currentLangAttempt];
+    }
+    return selected;
   }
 
   function getLangLabel() {
@@ -1000,14 +1024,14 @@ if (isRoom) {
       return;
     }
 
-    const lang = getSelectedLang();
+    const lang = getEffectiveLang();
 
     try {
       speechRecognition = new SpeechRecognition();
       speechRecognition.continuous = true;
       speechRecognition.interimResults = true;
       speechRecognition.lang = lang;
-      speechRecognition.maxAlternatives = 1;
+      speechRecognition.maxAlternatives = 3;
 
       clearTranscriptEmpty();
       setTranscriptionStatus('Starting...', 'listening');
@@ -1016,7 +1040,8 @@ if (isRoom) {
         console.log('Speech recognition started, lang:', lang);
         speechRecognitionRetries = 0;
         micDeniedRetries = 0;
-        setTranscriptionStatus('Listening...', 'listening');
+        langFailCount = 0;
+        setTranscriptionStatus(`Listening (${lang})...`, 'listening');
         showBanner(true);
       };
 
@@ -1082,6 +1107,18 @@ if (isRoom) {
             }
             return;
           case 'no-speech':
+            langFailCount++;
+            // If a language keeps failing, try fallback code
+            const selected = getSelectedLang();
+            const fallbacks = langFallbacks[selected];
+            if (langFailCount >= 3 && fallbacks && currentLangAttempt < fallbacks.length - 1) {
+              currentLangAttempt++;
+              console.log(`Language ${selected} struggling, trying fallback: ${fallbacks[currentLangAttempt]}`);
+              setTranscriptionStatus(`Trying ${fallbacks[currentLangAttempt]}...`, 'listening');
+              stopTranscription();
+              setTimeout(() => startTranscription(), 1000);
+              return;
+            }
             setTranscriptionStatus('No speech detected...', 'listening');
             break;
           case 'network':
@@ -1089,8 +1126,21 @@ if (isRoom) {
             setTranscriptionStatus('Network error', 'error');
             stopTranscription();
             break;
+          case 'audio-capture':
+            // Mic not available — might be in use by another app
+            setTranscriptionStatus('Mic unavailable', 'error');
+            showToast('Microphone not available — close other apps using the mic');
+            stopTranscription();
+            break;
           case 'aborted':
             break;
+          case 'language-not-supported':
+            showToast(`Language not supported — switching to Hindi`);
+            speechLangSelect.value = 'hi-IN';
+            currentLangAttempt = 0;
+            stopTranscription();
+            setTimeout(() => startTranscription(), 500);
+            return;
           default:
             setTranscriptionStatus('Error: ' + event.error, 'error');
         }
@@ -1154,6 +1204,8 @@ if (isRoom) {
   // Restart transcription when language changes
   if (speechLangSelect) {
     speechLangSelect.addEventListener('change', () => {
+      currentLangAttempt = 0;
+      langFailCount = 0;
       if (isTranscribing) {
         stopTranscription();
         startTranscription();

@@ -867,6 +867,7 @@ input {
   border-bottom: 1px solid rgba(60, 64, 67, 0.5);
   font-size: 13px;
   color: var(--text-secondary);
+  flex-wrap: wrap;
 }
 
 .language-selector label {
@@ -892,6 +893,14 @@ input {
 
 .language-selector select:focus {
   border-color: var(--accent);
+}
+
+.lang-hint {
+  font-size: 10px;
+  color: var(--text-dim);
+  display: block;
+  width: 100%;
+  margin-top: 2px;
 }
 
 .transcription-status {
