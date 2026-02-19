@@ -195,6 +195,9 @@ if (isRoom) {
   const transcriptContent = document.getElementById('transcript-content');
   const generateMinutesBtn = document.getElementById('generate-minutes-btn');
   const generatedMinutes = document.getElementById('generated-minutes');
+  const speechLangSelect = document.getElementById('speech-lang');
+  const transcriptBanner = document.getElementById('transcript-banner');
+  const bannerText = document.getElementById('banner-text');
 
   // Hide screen share button on mobile (getDisplayMedia not supported)
   if (isMobile && shareScreenBtn) {
@@ -526,6 +529,20 @@ if (isRoom) {
         showToast(`${peerDisplayName(msg.peerId)} left the meeting`);
         removePeer(msg.peerId);
         break;
+
+      case 'transcript': {
+        // Received transcript line from any peer (including self)
+        const senderName = msg.peerId === myPeerId ? 'You' : peerDisplayName(msg.peerId);
+        const ts = typeof msg.time === 'number'
+          ? new Date(msg.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : msg.time;
+        // Only add to transcriptLines if not already from local (avoid duplicates)
+        if (msg.peerId !== myPeerId) {
+          transcriptLines.push({ time: ts, text: msg.text, speaker: senderName });
+          addTranscriptLine(ts, msg.text, senderName);
+        }
+        break;
+      }
 
       case 'chat':
         addChatMessage(msg.peerId, msg.message, msg.timestamp);
@@ -945,6 +962,16 @@ if (isRoom) {
     toggleTranscriptionBtn.style.display = 'none';
   }
 
+  function getSelectedLang() {
+    return speechLangSelect ? speechLangSelect.value : 'kn-IN';
+  }
+
+  function getLangLabel() {
+    if (!speechLangSelect) return 'Kannada';
+    const opt = speechLangSelect.options[speechLangSelect.selectedIndex];
+    return opt ? opt.textContent : 'Kannada';
+  }
+
   function setTranscriptionStatus(text, type) {
     transcriptionStatus.textContent = text;
     transcriptionStatus.className = 'transcription-status';
@@ -956,26 +983,38 @@ if (isRoom) {
     if (emptyEl) emptyEl.remove();
   }
 
+  function showBanner(show) {
+    if (show) {
+      bannerText.textContent = `Transcribing (${getLangLabel()})`;
+      transcriptBanner.classList.add('active');
+    } else {
+      transcriptBanner.classList.remove('active');
+    }
+  }
+
   function startTranscription() {
     if (!speechSupported) {
       showToast('Speech recognition not supported — use Chrome or Edge, or type notes manually');
       return;
     }
 
+    const lang = getSelectedLang();
+
     try {
       speechRecognition = new SpeechRecognition();
       speechRecognition.continuous = true;
       speechRecognition.interimResults = true;
-      speechRecognition.lang = 'en-US';
+      speechRecognition.lang = lang;
       speechRecognition.maxAlternatives = 1;
 
       clearTranscriptEmpty();
       setTranscriptionStatus('Starting...', 'listening');
 
       speechRecognition.onstart = () => {
-        console.log('Speech recognition started');
+        console.log('Speech recognition started, lang:', lang);
         speechRecognitionRetries = 0;
         setTranscriptionStatus('Listening...', 'listening');
+        showBanner(true);
       };
 
       speechRecognition.onresult = (event) => {
@@ -987,8 +1026,15 @@ if (isRoom) {
             if (text) {
               const now = new Date();
               const ts = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              transcriptLines.push({ time: ts, text });
-              addTranscriptLine(ts, text);
+              transcriptLines.push({ time: ts, text, speaker: 'You' });
+              addTranscriptLine(ts, text, 'You');
+              // Share with all peers via WebSocket
+              wsSend({
+                type: 'transcript',
+                text,
+                time: Date.now(),
+                lang,
+              });
             }
           } else {
             interimTranscript += result[0].transcript;
@@ -1040,26 +1086,28 @@ if (isRoom) {
         if (isTranscribing) {
           speechRecognitionRetries++;
           if (speechRecognitionRetries > MAX_SPEECH_RETRIES) {
-            setTranscriptionStatus('Restarting...', 'listening');
+            // Too many rapid restarts — pause longer to avoid mic toggling
+            setTranscriptionStatus('Paused, resuming...', 'listening');
             speechRecognitionRetries = 0;
+            setTimeout(() => {
+              if (isTranscribing) {
+                stopTranscription();
+                startTranscription();
+              }
+            }, 3000);
+            return;
           }
-          // Auto-restart after a brief delay
+          // Restart after a delay to avoid mic conflict with WebRTC
+          const restartDelay = isMobile ? 1500 : 800;
           setTimeout(() => {
             if (isTranscribing && speechRecognition) {
               try {
                 speechRecognition.start();
               } catch (e) {
                 console.warn('Failed to restart speech recognition:', e);
-                // Create a new instance if start fails
-                setTimeout(() => {
-                  if (isTranscribing) {
-                    stopTranscription();
-                    startTranscription();
-                  }
-                }, 500);
               }
             }
-          }, 250);
+          }, restartDelay);
         }
       };
 
@@ -1067,7 +1115,7 @@ if (isRoom) {
       isTranscribing = true;
       toggleTranscriptionBtn.classList.add('active');
       toggleTranscriptionBtn.querySelector('.material-icons').textContent = 'stop';
-      showToast('Live transcription started — speak clearly');
+      showToast(`Transcription started — ${getLangLabel()}`);
     } catch (err) {
       console.error('Failed to start speech recognition:', err);
       showToast('Could not start transcription: ' + err.message);
@@ -1084,17 +1132,29 @@ if (isRoom) {
     toggleTranscriptionBtn.classList.remove('active');
     toggleTranscriptionBtn.querySelector('.material-icons').textContent = 'play_arrow';
     setTranscriptionStatus('', '');
+    showBanner(false);
     speechRecognitionRetries = 0;
   }
 
-  function addTranscriptLine(time, text) {
+  // Restart transcription when language changes
+  if (speechLangSelect) {
+    speechLangSelect.addEventListener('change', () => {
+      if (isTranscribing) {
+        stopTranscription();
+        startTranscription();
+      }
+    });
+  }
+
+  function addTranscriptLine(time, text, speaker) {
     clearTranscriptEmpty();
     const interimEl = transcriptContent.querySelector('.transcript-interim');
     if (interimEl) interimEl.remove();
 
     const line = document.createElement('div');
     line.className = 'transcript-line';
-    line.innerHTML = `<span class="ts">[${escapeHtml(time)}]</span> ${escapeHtml(text)}`;
+    const speakerLabel = speaker ? `<span class="transcript-speaker">${escapeHtml(speaker)}:</span> ` : '';
+    line.innerHTML = `<span class="ts">[${escapeHtml(time)}]</span> ${speakerLabel}${escapeHtml(text)}`;
     transcriptContent.appendChild(line);
     transcriptContent.scrollTop = transcriptContent.scrollHeight;
   }
@@ -1113,8 +1173,10 @@ if (isRoom) {
     if (!text) return;
     const now = new Date();
     const ts = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    transcriptLines.push({ time: ts, text });
-    addTranscriptLine(ts, text);
+    transcriptLines.push({ time: ts, text, speaker: 'You' });
+    addTranscriptLine(ts, text, 'You');
+    // Share manual notes too
+    wsSend({ type: 'transcript', text, time: Date.now(), lang: getSelectedLang() });
     manualTranscriptInput.value = '';
   }
 
@@ -1130,9 +1192,9 @@ if (isRoom) {
       return;
     }
 
-    // Build transcript text
+    // Build transcript text with speaker labels
     const transcriptText = transcriptLines
-      .map(l => `[${l.time}] ${l.text}`)
+      .map(l => `[${l.time}] ${l.speaker || 'Unknown'}: ${l.text}`)
       .join('\n');
 
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -1242,6 +1304,14 @@ if (isRoom) {
     await getLocalMedia();
     connectWebSocket();
     updateGridLayout();
+
+    // Auto-start transcription after mic has settled (avoid conflict with getUserMedia)
+    if (speechSupported) {
+      setTimeout(() => {
+        startTranscription();
+        showToast('Transcription auto-started — select your language in the minutes panel');
+      }, 4000);
+    }
   }
 
   initRoom();

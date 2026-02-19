@@ -93,7 +93,7 @@ app.post('/api/generate-minutes', async (req, res) => {
         messages: [
           {
             role: 'system',
-            content: 'You are a meeting minutes assistant. Generate concise, professional, and actionable meeting minutes from transcripts.'
+            content: 'You are a meeting minutes assistant. Generate concise, professional, and actionable meeting minutes from transcripts. The transcript may be in Kannada, Hindi, Telugu, Tamil, or other Indian languages. Understand the content regardless of language and ALWAYS generate the minutes in English. Translate any non-English content to English in the minutes.'
           },
           {
             role: 'user',
@@ -319,6 +319,29 @@ wss.on('connection', (ws) => {
           removeFromRoom(peerId, currentRoomId);
           safeSend(ws, { type: 'left', roomId: currentRoomId });
           currentRoomId = null;
+        }
+        break;
+      }
+
+      case 'transcript': {
+        const { text, time, lang } = msg;
+        if (!currentRoomId) return;
+        if (!text || typeof text !== 'string') return;
+
+        const room = rooms.get(currentRoomId);
+        if (!room) return;
+
+        const transcriptPayload = {
+          type: 'transcript',
+          peerId,
+          text,
+          time: time || Date.now(),
+          lang: lang || 'en',
+        };
+
+        // Broadcast transcript to all peers (including sender for confirmation)
+        for (const [, otherWs] of room) {
+          safeSend(otherWs, transcriptPayload);
         }
         break;
       }

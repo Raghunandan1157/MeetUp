@@ -32,6 +32,13 @@
     </div>
   </header>
 
+  <!-- Transcript Live Banner (left side) -->
+  <div id="transcript-banner" class="transcript-banner">
+    <div class="banner-pulse"></div>
+    <span class="material-icons" style="font-size:16px">subtitles</span>
+    <span id="banner-text">Transcription active</span>
+  </div>
+
   <!-- Video Grid Area -->
   <main class="video-area">
     <div id="video-grid" class="video-grid grid-1">
@@ -65,10 +72,29 @@
             <span class="material-icons">play_arrow</span>
           </button>
         </div>
+        <div class="language-selector">
+          <label for="speech-lang">
+            <span class="material-icons" style="font-size:16px">translate</span>
+            Language:
+          </label>
+          <select id="speech-lang">
+            <option value="kn-IN">ಕನ್ನಡ (Kannada)</option>
+            <option value="hi-IN">हिन्दी (Hindi)</option>
+            <option value="en-IN">English (India)</option>
+            <option value="te-IN">తెలుగు (Telugu)</option>
+            <option value="ta-IN">தமிழ் (Tamil)</option>
+            <option value="ml-IN">മലയാളം (Malayalam)</option>
+            <option value="mr-IN">मराठी (Marathi)</option>
+            <option value="gu-IN">ગુજરાતી (Gujarati)</option>
+            <option value="bn-IN">বাংলা (Bengali)</option>
+            <option value="pa-IN">ਪੰਜਾਬੀ (Punjabi)</option>
+            <option value="en-US">English (US)</option>
+          </select>
+        </div>
         <div id="transcript-content" class="transcript-content">
           <div class="transcript-empty">
             <span class="material-icons">subtitles</span>
-            <p>Click play to start live transcription.<br>Works best in Chrome/Edge. Speak clearly into your mic.</p>
+            <p>Click play to start live transcription.<br><strong>Requires Google Chrome or Edge browser.</strong><br>Not supported in Safari or Samsung Internet.<br>You can also type notes manually below.</p>
           </div>
         </div>
         <div class="transcript-manual-input">
