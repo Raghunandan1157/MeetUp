@@ -158,6 +158,10 @@ if (isRoom) {
   let timerInterval = null;
   let wsReconnectTimer = null;
   let intentionalLeave = false;
+  let mediaRecorder = null;
+  let recordedChunks = [];
+  let isRecording = false;
+  let recordingStream = null;
 
   // DOM Elements
   const videoGrid = document.getElementById('video-grid');
@@ -171,6 +175,8 @@ if (isRoom) {
   const shareScreenBtn = document.getElementById('share-screen');
   const toggleChatBtn = document.getElementById('toggle-chat');
   const copyLinkBtn = document.getElementById('copy-link');
+  const recordBtn = document.getElementById('record-btn');
+  const recordingIndicator = document.getElementById('recording-indicator');
   const leaveBtn = document.getElementById('leave-btn');
   const chatPanel = document.getElementById('chat-panel');
   const closeChatBtn = document.getElementById('close-chat');
@@ -633,6 +639,123 @@ if (isRoom) {
     toggleChatBtn.classList.remove('active');
   });
 
+  // ===== Recording =====
+  function createRecordingStream() {
+    // Combine all audio+video into one stream for recording
+    const audioCtx = new AudioContext();
+    const destination = audioCtx.createMediaStreamDestination();
+
+    // Add local audio
+    if (localStream) {
+      const localAudioTracks = localStream.getAudioTracks();
+      if (localAudioTracks.length > 0) {
+        const localSource = audioCtx.createMediaStreamSource(
+          new MediaStream(localAudioTracks)
+        );
+        localSource.connect(destination);
+      }
+    }
+
+    // Add remote audio from all peers
+    for (const peerId of Object.keys(peers)) {
+      const remoteStream = peers[peerId].stream;
+      const remoteAudioTracks = remoteStream.getAudioTracks();
+      if (remoteAudioTracks.length > 0) {
+        const remoteSource = audioCtx.createMediaStreamSource(
+          new MediaStream(remoteAudioTracks)
+        );
+        remoteSource.connect(destination);
+      }
+    }
+
+    // Use local video track (or screen share if active)
+    const videoTrack = localVideo.srcObject
+      ? localVideo.srcObject.getVideoTracks()[0]
+      : null;
+
+    const tracks = [...destination.stream.getTracks()];
+    if (videoTrack) tracks.push(videoTrack);
+
+    return { stream: new MediaStream(tracks), audioCtx };
+  }
+
+  function startRecording() {
+    try {
+      const { stream, audioCtx } = createRecordingStream();
+      recordingStream = { stream, audioCtx };
+      recordedChunks = [];
+
+      // Pick supported mime type
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+        ? 'video/webm;codecs=vp9,opus'
+        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+          ? 'video/webm;codecs=vp8,opus'
+          : 'video/webm';
+
+      mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          recordedChunks.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        downloadRecording();
+        // Clean up audio context
+        if (recordingStream && recordingStream.audioCtx) {
+          recordingStream.audioCtx.close().catch(() => {});
+        }
+        recordingStream = null;
+      };
+
+      mediaRecorder.start(1000); // Collect data every second
+      isRecording = true;
+      recordBtn.classList.add('recording');
+      recordBtn.querySelector('.material-icons').textContent = 'stop';
+      recordingIndicator.classList.add('active');
+      showToast('Recording started');
+    } catch (err) {
+      console.error('Failed to start recording:', err);
+      showToast('Could not start recording');
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
+    isRecording = false;
+    recordBtn.classList.remove('recording');
+    recordBtn.querySelector('.material-icons').textContent = 'fiber_manual_record';
+    recordingIndicator.classList.remove('active');
+    showToast('Recording stopped — downloading file');
+  }
+
+  function downloadRecording() {
+    if (recordedChunks.length === 0) return;
+
+    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.download = `MeetUp-Recording-${timestamp}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    recordedChunks = [];
+  }
+
+  recordBtn.addEventListener('click', () => {
+    if (!isRecording) {
+      startRecording();
+    } else {
+      stopRecording();
+    }
+  });
+
   // Copy Link
   copyLinkBtn.addEventListener('click', () => {
     const url = `${window.location.origin}/room.html?room=${roomId}`;
@@ -657,6 +780,11 @@ if (isRoom) {
 
   function leaveMeeting() {
     intentionalLeave = true;
+
+    // Auto-stop recording and download before leaving
+    if (isRecording) {
+      stopRecording();
+    }
 
     // Clear reconnect timer
     if (wsReconnectTimer) {
