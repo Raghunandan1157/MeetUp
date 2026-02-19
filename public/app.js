@@ -713,20 +713,31 @@ if (isRoom) {
     return { stream: new MediaStream(tracks), audioCtx };
   }
 
+  let recordingMimeType = 'video/webm';
+
   function startRecording() {
     try {
       const { stream, audioCtx } = createRecordingStream();
       recordingStream = { stream, audioCtx };
       recordedChunks = [];
 
-      // Pick supported mime type
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-        ? 'video/webm;codecs=vp9,opus'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-          ? 'video/webm;codecs=vp8,opus'
-          : 'video/webm';
+      // Try MP4 first (Safari/iOS), then WebM (Chrome/Firefox)
+      const mimeOptions = [
+        'video/mp4',
+        'video/mp4;codecs=avc1,mp4a.40.2',
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+      ];
+      recordingMimeType = 'video/webm';
+      for (const mime of mimeOptions) {
+        if (MediaRecorder.isTypeSupported(mime)) {
+          recordingMimeType = mime;
+          break;
+        }
+      }
 
-      mediaRecorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorder = new MediaRecorder(stream, { mimeType: recordingMimeType });
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
@@ -748,7 +759,8 @@ if (isRoom) {
       recordBtn.classList.add('recording');
       recordBtn.querySelector('.material-icons').textContent = 'stop';
       recordingIndicator.classList.add('active');
-      showToast('Recording started');
+      const fmt = recordingMimeType.startsWith('video/mp4') ? 'MP4' : 'WebM';
+      showToast(`Recording started (${fmt})`);
     } catch (err) {
       console.error('Failed to start recording:', err);
       showToast('Could not start recording');
@@ -766,50 +778,26 @@ if (isRoom) {
     showToast('Recording stopped — downloading file');
   }
 
-  async function downloadRecording() {
+  function downloadRecording() {
     if (recordedChunks.length === 0) return;
 
-    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    const isMP4 = recordingMimeType.startsWith('video/mp4');
+    const blobType = isMP4 ? 'video/mp4' : 'video/webm';
+    const ext = isMP4 ? 'mp4' : 'webm';
+
+    const blob = new Blob(recordedChunks, { type: blobType });
     recordedChunks = [];
 
-    showToast('Converting to MP4...');
-
-    try {
-      const formData = new FormData();
-      formData.append('video', blob, 'recording.webm');
-
-      const response = await fetch('/api/convert', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) throw new Error('Conversion failed');
-
-      const mp4Blob = await response.blob();
-      const url = URL.createObjectURL(mp4Blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      a.download = `MeetUp-Recording-${timestamp}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showToast('MP4 recording downloaded!');
-    } catch (err) {
-      console.error('MP4 conversion failed, falling back to WebM:', err);
-      // Fallback: download as WebM
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      a.download = `MeetUp-Recording-${timestamp}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showToast('Downloaded as WebM (MP4 conversion unavailable)');
-    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.download = `MeetUp-Recording-${timestamp}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`Recording downloaded (${ext.toUpperCase()})`);
   }
 
   recordBtn.addEventListener('click', () => {
