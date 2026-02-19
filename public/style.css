@@ -815,6 +815,52 @@ input {
   animation: recordPulse 1.5s ease-in-out infinite;
 }
 
+.transcription-status {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-left: auto;
+  margin-right: 8px;
+}
+
+.transcription-status.listening {
+  color: var(--accent);
+}
+
+.transcription-status.error {
+  color: var(--red);
+}
+
+.transcript-manual-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-top: 1px solid rgba(60, 64, 67, 0.5);
+}
+
+.transcript-manual-input input {
+  flex: 1;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  transition: border-color 0.2s;
+}
+
+.transcript-manual-input input::placeholder {
+  color: var(--text-dim);
+}
+
+.transcript-manual-input input:focus {
+  border-color: var(--accent);
+}
+
+.transcript-manual-input .icon-btn {
+  color: var(--accent);
+}
+
 .transcript-content {
   max-height: 250px;
   overflow-y: auto;

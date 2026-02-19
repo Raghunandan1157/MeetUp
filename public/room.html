@@ -60,6 +60,7 @@
         <div class="transcript-header">
           <span class="material-icons" style="font-size:18px">mic</span>
           <span>Live Transcript</span>
+          <span id="transcription-status" class="transcription-status"></span>
           <button id="toggle-transcription" class="transcript-toggle-btn" title="Start transcription">
             <span class="material-icons">play_arrow</span>
           </button>
@@ -67,8 +68,14 @@
         <div id="transcript-content" class="transcript-content">
           <div class="transcript-empty">
             <span class="material-icons">subtitles</span>
-            <p>Click play to start live transcription. Speech will be captured and transcribed in real-time.</p>
+            <p>Click play to start live transcription.<br>Works best in Chrome/Edge. Speak clearly into your mic.</p>
           </div>
+        </div>
+        <div class="transcript-manual-input">
+          <input type="text" id="manual-transcript-input" placeholder="Type notes manually..." autocomplete="off">
+          <button id="add-manual-note" class="icon-btn" title="Add note">
+            <span class="material-icons">add</span>
+          </button>
         </div>
       </div>
       <div id="generated-minutes" class="generated-minutes">

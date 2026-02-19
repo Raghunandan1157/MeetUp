@@ -929,89 +929,166 @@ if (isRoom) {
   });
 
   // ===== Live Transcription (Web Speech API) =====
+  const transcriptionStatus = document.getElementById('transcription-status');
+  const manualTranscriptInput = document.getElementById('manual-transcript-input');
+  const addManualNoteBtn = document.getElementById('add-manual-note');
+  let speechRecognitionRetries = 0;
+  const MAX_SPEECH_RETRIES = 3;
+
+  // Check browser support upfront
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const speechSupported = !!SpeechRecognition;
+
+  if (!speechSupported) {
+    transcriptionStatus.textContent = 'Not supported';
+    transcriptionStatus.classList.add('error');
+    toggleTranscriptionBtn.style.display = 'none';
+  }
+
+  function setTranscriptionStatus(text, type) {
+    transcriptionStatus.textContent = text;
+    transcriptionStatus.className = 'transcription-status';
+    if (type) transcriptionStatus.classList.add(type);
+  }
+
+  function clearTranscriptEmpty() {
+    const emptyEl = transcriptContent.querySelector('.transcript-empty');
+    if (emptyEl) emptyEl.remove();
+  }
+
   function startTranscription() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      showToast('Speech recognition not supported in this browser');
+    if (!speechSupported) {
+      showToast('Speech recognition not supported — use Chrome or Edge, or type notes manually');
       return;
     }
 
-    speechRecognition = new SpeechRecognition();
-    speechRecognition.continuous = true;
-    speechRecognition.interimResults = true;
-    speechRecognition.lang = 'en-US';
+    try {
+      speechRecognition = new SpeechRecognition();
+      speechRecognition.continuous = true;
+      speechRecognition.interimResults = true;
+      speechRecognition.lang = 'en-US';
+      speechRecognition.maxAlternatives = 1;
 
-    // Clear empty state
-    const emptyEl = transcriptContent.querySelector('.transcript-empty');
-    if (emptyEl) emptyEl.remove();
+      clearTranscriptEmpty();
+      setTranscriptionStatus('Starting...', 'listening');
 
-    speechRecognition.onresult = (event) => {
-      let interimTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) {
-          const text = result[0].transcript.trim();
-          if (text) {
-            const now = new Date();
-            const ts = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            transcriptLines.push({ time: ts, text });
-            addTranscriptLine(ts, text);
+      speechRecognition.onstart = () => {
+        console.log('Speech recognition started');
+        speechRecognitionRetries = 0;
+        setTranscriptionStatus('Listening...', 'listening');
+      };
+
+      speechRecognition.onresult = (event) => {
+        let interimTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          if (result.isFinal) {
+            const text = result[0].transcript.trim();
+            if (text) {
+              const now = new Date();
+              const ts = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              transcriptLines.push({ time: ts, text });
+              addTranscriptLine(ts, text);
+            }
+          } else {
+            interimTranscript += result[0].transcript;
           }
-        } else {
-          interimTranscript += result[0].transcript;
         }
-      }
-      // Show interim text
-      let interimEl = transcriptContent.querySelector('.transcript-interim');
-      if (interimTranscript) {
-        if (!interimEl) {
-          interimEl = document.createElement('div');
-          interimEl.className = 'transcript-line transcript-interim';
-          interimEl.style.opacity = '0.5';
-          interimEl.style.fontStyle = 'italic';
-          transcriptContent.appendChild(interimEl);
+        // Show interim text
+        let interimEl = transcriptContent.querySelector('.transcript-interim');
+        if (interimTranscript) {
+          if (!interimEl) {
+            interimEl = document.createElement('div');
+            interimEl.className = 'transcript-line transcript-interim';
+            interimEl.style.opacity = '0.5';
+            interimEl.style.fontStyle = 'italic';
+            transcriptContent.appendChild(interimEl);
+          }
+          interimEl.textContent = interimTranscript;
+          transcriptContent.scrollTop = transcriptContent.scrollHeight;
+        } else if (interimEl) {
+          interimEl.remove();
         }
-        interimEl.textContent = interimTranscript;
-        transcriptContent.scrollTop = transcriptContent.scrollHeight;
-      } else if (interimEl) {
-        interimEl.remove();
-      }
-    };
+      };
 
-    speechRecognition.onerror = (event) => {
-      console.warn('Speech recognition error:', event.error);
-      if (event.error === 'not-allowed') {
-        showToast('Microphone access denied for transcription');
-        stopTranscription();
-      }
-    };
+      speechRecognition.onerror = (event) => {
+        console.warn('Speech recognition error:', event.error);
+        switch (event.error) {
+          case 'not-allowed':
+          case 'service-not-allowed':
+            showToast('Microphone access denied — check browser permissions');
+            setTranscriptionStatus('Mic denied', 'error');
+            stopTranscription();
+            break;
+          case 'no-speech':
+            setTranscriptionStatus('No speech detected...', 'listening');
+            break;
+          case 'network':
+            showToast('Network error — speech recognition requires internet');
+            setTranscriptionStatus('Network error', 'error');
+            stopTranscription();
+            break;
+          case 'aborted':
+            break;
+          default:
+            setTranscriptionStatus('Error: ' + event.error, 'error');
+        }
+      };
 
-    speechRecognition.onend = () => {
-      // Auto-restart if still transcribing (it stops on silence)
-      if (isTranscribing) {
-        try { speechRecognition.start(); } catch (e) {}
-      }
-    };
+      speechRecognition.onend = () => {
+        console.log('Speech recognition ended, isTranscribing:', isTranscribing);
+        if (isTranscribing) {
+          speechRecognitionRetries++;
+          if (speechRecognitionRetries > MAX_SPEECH_RETRIES) {
+            setTranscriptionStatus('Restarting...', 'listening');
+            speechRecognitionRetries = 0;
+          }
+          // Auto-restart after a brief delay
+          setTimeout(() => {
+            if (isTranscribing && speechRecognition) {
+              try {
+                speechRecognition.start();
+              } catch (e) {
+                console.warn('Failed to restart speech recognition:', e);
+                // Create a new instance if start fails
+                setTimeout(() => {
+                  if (isTranscribing) {
+                    stopTranscription();
+                    startTranscription();
+                  }
+                }, 500);
+              }
+            }
+          }, 250);
+        }
+      };
 
-    speechRecognition.start();
-    isTranscribing = true;
-    toggleTranscriptionBtn.classList.add('active');
-    toggleTranscriptionBtn.querySelector('.material-icons').textContent = 'stop';
-    showToast('Live transcription started');
+      speechRecognition.start();
+      isTranscribing = true;
+      toggleTranscriptionBtn.classList.add('active');
+      toggleTranscriptionBtn.querySelector('.material-icons').textContent = 'stop';
+      showToast('Live transcription started — speak clearly');
+    } catch (err) {
+      console.error('Failed to start speech recognition:', err);
+      showToast('Could not start transcription: ' + err.message);
+      setTranscriptionStatus('Failed to start', 'error');
+    }
   }
 
   function stopTranscription() {
+    isTranscribing = false;
     if (speechRecognition) {
-      isTranscribing = false;
-      speechRecognition.stop();
+      try { speechRecognition.stop(); } catch (e) {}
       speechRecognition = null;
     }
     toggleTranscriptionBtn.classList.remove('active');
     toggleTranscriptionBtn.querySelector('.material-icons').textContent = 'play_arrow';
+    setTranscriptionStatus('', '');
+    speechRecognitionRetries = 0;
   }
 
   function addTranscriptLine(time, text) {
-    // Remove interim element if exists
+    clearTranscriptEmpty();
     const interimEl = transcriptContent.querySelector('.transcript-interim');
     if (interimEl) interimEl.remove();
 
@@ -1030,10 +1107,26 @@ if (isRoom) {
     }
   });
 
+  // ===== Manual Transcript Input (fallback) =====
+  function addManualNote() {
+    const text = manualTranscriptInput.value.trim();
+    if (!text) return;
+    const now = new Date();
+    const ts = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    transcriptLines.push({ time: ts, text });
+    addTranscriptLine(ts, text);
+    manualTranscriptInput.value = '';
+  }
+
+  addManualNoteBtn.addEventListener('click', addManualNote);
+  manualTranscriptInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addManualNote();
+  });
+
   // ===== Generate AI Minutes =====
   generateMinutesBtn.addEventListener('click', async () => {
     if (transcriptLines.length === 0) {
-      showToast('No transcript available. Start transcription first.');
+      showToast('No transcript available. Use speech transcription or type notes manually.');
       return;
     }
 
