@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MeetUp - Meeting Room</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="room-page">
+  <!-- Top Info Bar -->
+  <header class="room-header">
+    <div class="header-left">
+      <span class="material-icons brand-icon-sm">videocam</span>
+      <span class="brand-text">MeetUp</span>
+    </div>
+    <div class="header-center">
+      <span id="meeting-code" class="meeting-code"></span>
+      <span class="header-sep">|</span>
+      <span id="elapsed-time" class="elapsed-time">00:00</span>
+    </div>
+    <div class="header-right">
+      <span class="material-icons" style="font-size:18px">people</span>
+      <span id="participant-count">1</span>
+    </div>
+  </header>
+
+  <!-- Video Grid Area -->
+  <main class="video-area">
+    <div id="video-grid" class="video-grid grid-1">
+      <!-- Local video tile -->
+      <div class="video-tile" id="local-tile" data-peer="local">
+        <video id="local-video" autoplay muted playsinline></video>
+        <div class="tile-overlay">
+          <span class="tile-name">You</span>
+          <span class="tile-mute-icon material-icons" id="local-mute-icon" style="display:none">mic_off</span>
+        </div>
+      </div>
+      <!-- Remote tiles appended here -->
+    </div>
+  </main>
+
+  <!-- Chat Side Panel -->
+  <aside id="chat-panel" class="chat-panel">
+    <div class="chat-header">
+      <h3>In-call messages</h3>
+      <button id="close-chat" class="icon-btn" title="Close chat">
+        <span class="material-icons">close</span>
+      </button>
+    </div>
+    <div id="chat-messages" class="chat-messages">
+      <div class="chat-empty">
+        <span class="material-icons">chat_bubble_outline</span>
+        <p>Messages can only be seen by people in the call and are deleted when the call ends.</p>
+      </div>
+    </div>
+    <div class="chat-input-area">
+      <input type="text" id="chat-input" placeholder="Send a message..." autocomplete="off">
+      <button id="send-chat-btn" class="icon-btn" title="Send message">
+        <span class="material-icons">send</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Bottom Control Bar -->
+  <footer class="control-bar">
+    <div class="controls-center">
+      <button id="toggle-mic" class="control-btn active" title="Toggle microphone">
+        <span class="material-icons">mic</span>
+      </button>
+      <button id="toggle-cam" class="control-btn active" title="Toggle camera">
+        <span class="material-icons">videocam</span>
+      </button>
+      <button id="share-screen" class="control-btn" title="Share screen">
+        <span class="material-icons">present_to_all</span>
+      </button>
+      <button id="toggle-chat" class="control-btn" title="Toggle chat">
+        <span class="material-icons">chat</span>
+      </button>
+      <button id="copy-link" class="control-btn" title="Copy meeting link">
+        <span class="material-icons">link</span>
+      </button>
+      <button id="leave-btn" class="control-btn leave" title="Leave meeting">
+        <span class="material-icons">call_end</span>
+      </button>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

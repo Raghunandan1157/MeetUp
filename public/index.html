@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MeetUp - Video Conferencing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="lobby-page">
+  <header class="lobby-header">
+    <div class="brand">
+      <span class="material-icons brand-icon">videocam</span>
+      <h1>MeetUp</h1>
+    </div>
+  </header>
+
+  <main class="lobby-main">
+    <div class="lobby-card">
+      <div class="preview-section">
+        <div class="video-preview-container">
+          <video id="preview-video" autoplay muted playsinline></video>
+          <div id="preview-placeholder" class="preview-placeholder">
+            <span class="material-icons">videocam_off</span>
+            <p>Camera is off</p>
+          </div>
+        </div>
+        <div class="preview-controls">
+          <button id="toggle-preview-mic" class="preview-btn active" title="Toggle microphone">
+            <span class="material-icons">mic</span>
+          </button>
+          <button id="toggle-preview-cam" class="preview-btn active" title="Toggle camera">
+            <span class="material-icons">videocam</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="lobby-actions">
+        <h2>Start or join a meeting</h2>
+        <p class="lobby-subtitle">Connect with anyone, anywhere</p>
+
+        <button id="new-meeting-btn" class="btn btn-primary">
+          <span class="material-icons">video_call</span>
+          New Meeting
+        </button>
+
+        <div class="divider">
+          <span>or</span>
+        </div>
+
+        <div class="join-form">
+          <div class="input-group">
+            <span class="material-icons input-icon">keyboard</span>
+            <input type="text" id="room-code-input" placeholder="Enter meeting code" maxlength="10" autocomplete="off">
+          </div>
+          <button id="join-btn" class="btn btn-secondary" disabled>
+            Join
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="lobby-footer">
+    <p>MeetUp &mdash; Secure video conferencing for everyone</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
