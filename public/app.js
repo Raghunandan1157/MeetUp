@@ -162,7 +162,6 @@ if (isRoom) {
   let recordedChunks = [];
   let isRecording = false;
   let recordingStream = null;
-  let speechRecognition = null;
   let isTranscribing = false;
   let transcriptLines = [];
 
@@ -187,17 +186,25 @@ if (isRoom) {
   const chatInput = document.getElementById('chat-input');
   const sendChatBtn = document.getElementById('send-chat-btn');
 
-  // Minutes panel DOM
-  const minutesPanel = document.getElementById('minutes-panel');
-  const closeMinutesBtn = document.getElementById('close-minutes');
-  const toggleMinutesBtn = document.getElementById('toggle-minutes');
-  const toggleTranscriptionBtn = document.getElementById('toggle-transcription');
-  const transcriptContent = document.getElementById('transcript-content');
-  const generateMinutesBtn = document.getElementById('generate-minutes-btn');
-  const generatedMinutes = document.getElementById('generated-minutes');
-  const speechLangSelect = document.getElementById('speech-lang');
-  const transcriptBanner = document.getElementById('transcript-banner');
-  const bannerText = document.getElementById('banner-text');
+  // Transcript strip DOM
+  const transcriptStrip = document.getElementById('transcript-strip');
+  const transcriptStripContent = document.getElementById('transcript-strip-content');
+  const transcriptLangBadges = document.getElementById('transcript-lang-badges');
+
+  // Left panel DOM
+  const leftPanel = document.getElementById('left-panel');
+  const toggleLeftPanelBtn = document.getElementById('toggle-left-panel');
+
+  // Right panel DOM
+  const rightPanel = document.getElementById('right-panel');
+  const toggleRightPanelBtn = document.getElementById('toggle-right-panel');
+  const processTranscriptBtn = document.getElementById('process-transcript-btn');
+
+  // Insight card DOM
+  const insightSummary = document.getElementById('insight-summary');
+  const insightDecisions = document.getElementById('insight-decisions');
+  const insightActions = document.getElementById('insight-actions');
+  const insightFollowups = document.getElementById('insight-followups');
 
   // Hide screen share button on mobile (getDisplayMedia not supported)
   if (isMobile && shareScreenBtn) {
@@ -536,10 +543,11 @@ if (isRoom) {
         const ts = typeof msg.time === 'number'
           ? new Date(msg.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           : msg.time;
+        const lang = msg.lang || '';
         // Only add to transcriptLines if not already from local (avoid duplicates)
         if (msg.peerId !== myPeerId) {
-          transcriptLines.push({ time: ts, text: msg.text, speaker: senderName });
-          addTranscriptLine(ts, msg.text, senderName);
+          transcriptLines.push({ time: ts, text: msg.text, speaker: senderName, lang });
+          addTranscriptLine(ts, msg.text, senderName, lang);
         }
         break;
       }
@@ -661,11 +669,6 @@ if (isRoom) {
   toggleChatBtn.addEventListener('click', () => {
     chatPanel.classList.toggle('open');
     toggleChatBtn.classList.toggle('active');
-    // Close minutes if open
-    if (chatPanel.classList.contains('open')) {
-      minutesPanel.classList.remove('open');
-      toggleMinutesBtn.classList.remove('active');
-    }
   });
 
   closeChatBtn.addEventListener('click', () => {
@@ -917,333 +920,140 @@ if (isRoom) {
     if (e.key === 'Enter') sendChatMessage();
   });
 
-  // ===== Minutes Panel =====
-  toggleMinutesBtn.addEventListener('click', () => {
-    minutesPanel.classList.toggle('open');
-    toggleMinutesBtn.classList.toggle('active');
-    // Close chat if open
-    if (minutesPanel.classList.contains('open')) {
-      chatPanel.classList.remove('open');
-      toggleChatBtn.classList.remove('active');
-    }
+  // ===== Panel Collapse Toggles =====
+  toggleLeftPanelBtn.addEventListener('click', () => {
+    leftPanel.classList.toggle('collapsed');
   });
 
-  closeMinutesBtn.addEventListener('click', () => {
-    minutesPanel.classList.remove('open');
-    toggleMinutesBtn.classList.remove('active');
+  toggleRightPanelBtn.addEventListener('click', () => {
+    rightPanel.classList.toggle('collapsed');
   });
 
-  // ===== Live Transcription (Web Speech API) =====
-  const transcriptionStatus = document.getElementById('transcription-status');
-  const manualTranscriptInput = document.getElementById('manual-transcript-input');
-  const addManualNoteBtn = document.getElementById('add-manual-note');
-  let speechRecognitionRetries = 0;
-  let micDeniedRetries = 0;
-  const MAX_SPEECH_RETRIES = 3;
-  const MAX_MIC_DENIED_RETRIES = 3;
+  // ===== Live Transcription (Google Cloud Speech-to-Text, auto-detect) =====
+  let googleSttRecorder = null;
+  const GOOGLE_STT_CHUNK_DURATION = 5000; // 5 seconds per chunk
+  const detectedLanguages = new Set();
 
-  // Check browser support upfront
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const speechSupported = !!SpeechRecognition;
+  function addTranscriptLine(time, text, speaker, lang) {
+    // Remove placeholder
+    const placeholder = transcriptStripContent.querySelector('.transcript-strip-placeholder');
+    if (placeholder) placeholder.remove();
 
-  if (!speechSupported) {
-    transcriptionStatus.textContent = 'Not supported';
-    transcriptionStatus.classList.add('error');
-    toggleTranscriptionBtn.style.display = 'none';
-  }
+    const line = document.createElement('span');
+    line.className = 'strip-line';
+    line.innerHTML = `<span class="strip-time">[${escapeHtml(time)}]</span> <span class="strip-speaker">${escapeHtml(speaker)}:</span> ${escapeHtml(text)}`;
+    transcriptStripContent.appendChild(line);
 
-  // Language fallback map: primary -> fallback codes to try
-  const langFallbacks = {
-    'kn-IN': ['kn', 'kn-IN'],
-    'te-IN': ['te', 'te-IN'],
-    'ta-IN': ['ta', 'ta-IN'],
-    'ml-IN': ['ml', 'ml-IN'],
-    'mr-IN': ['mr', 'mr-IN'],
-    'gu-IN': ['gu', 'gu-IN'],
-    'bn-IN': ['bn', 'bn-IN'],
-    'pa-IN': ['pa', 'pa-IN'],
-  };
-  let currentLangAttempt = 0;
-  let langFailCount = 0;
+    // Auto-scroll strip to show newest text
+    transcriptStripContent.scrollLeft = transcriptStripContent.scrollWidth;
 
-  function getSelectedLang() {
-    return speechLangSelect ? speechLangSelect.value : 'kn-IN';
-  }
-
-  // Get the actual language code to use (with fallback)
-  function getEffectiveLang() {
-    const selected = getSelectedLang();
-    const fallbacks = langFallbacks[selected];
-    if (fallbacks && currentLangAttempt > 0 && currentLangAttempt < fallbacks.length) {
-      return fallbacks[currentLangAttempt];
+    // Show language badge if detected
+    if (lang) {
+      addLanguageBadge(lang);
     }
-    return selected;
   }
 
-  function getLangLabel() {
-    if (!speechLangSelect) return 'Kannada';
-    const opt = speechLangSelect.options[speechLangSelect.selectedIndex];
-    return opt ? opt.textContent : 'Kannada';
-  }
+  function addLanguageBadge(langCode) {
+    if (!langCode || detectedLanguages.has(langCode)) return;
+    detectedLanguages.add(langCode);
 
-  function setTranscriptionStatus(text, type) {
-    transcriptionStatus.textContent = text;
-    transcriptionStatus.className = 'transcription-status';
-    if (type) transcriptionStatus.classList.add(type);
-  }
-
-  function clearTranscriptEmpty() {
-    const emptyEl = transcriptContent.querySelector('.transcript-empty');
-    if (emptyEl) emptyEl.remove();
-  }
-
-  function showBanner(show) {
-    if (show) {
-      bannerText.textContent = `Transcribing (${getLangLabel()})`;
-      transcriptBanner.classList.add('active');
-    } else {
-      transcriptBanner.classList.remove('active');
-    }
+    const badge = document.createElement('span');
+    badge.className = 'lang-badge';
+    badge.textContent = langCode;
+    transcriptLangBadges.appendChild(badge);
   }
 
   function startTranscription() {
-    if (!speechSupported) {
-      showToast('Speech recognition not supported — use Chrome or Edge, or type notes manually');
+    if (!localStream || localStream.getAudioTracks().length === 0) {
+      showToast('No microphone available for transcription');
       return;
     }
 
-    const lang = getEffectiveLang();
+    isTranscribing = true;
+    showToast('Transcription started');
 
-    try {
-      speechRecognition = new SpeechRecognition();
-      speechRecognition.continuous = true;
-      speechRecognition.interimResults = true;
-      speechRecognition.lang = lang;
-      speechRecognition.maxAlternatives = 3;
+    const audioStream = new MediaStream(localStream.getAudioTracks());
+    startGoogleSttCycle(audioStream);
+  }
 
-      clearTranscriptEmpty();
-      setTranscriptionStatus('Starting...', 'listening');
+  function startGoogleSttCycle(audioStream) {
+    if (!isTranscribing) return;
 
-      speechRecognition.onstart = () => {
-        console.log('Speech recognition started, lang:', lang);
-        speechRecognitionRetries = 0;
-        micDeniedRetries = 0;
-        langFailCount = 0;
-        setTranscriptionStatus(`Listening (${lang})...`, 'listening');
-        showBanner(true);
-      };
-
-      speechRecognition.onresult = (event) => {
-        let interimTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const result = event.results[i];
-          if (result.isFinal) {
-            const text = result[0].transcript.trim();
-            if (text) {
-              const now = new Date();
-              const ts = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              transcriptLines.push({ time: ts, text, speaker: 'You' });
-              addTranscriptLine(ts, text, 'You');
-              // Share with all peers via WebSocket
-              wsSend({
-                type: 'transcript',
-                text,
-                time: Date.now(),
-                lang,
-              });
-            }
-          } else {
-            interimTranscript += result[0].transcript;
-          }
-        }
-        // Show interim text
-        let interimEl = transcriptContent.querySelector('.transcript-interim');
-        if (interimTranscript) {
-          if (!interimEl) {
-            interimEl = document.createElement('div');
-            interimEl.className = 'transcript-line transcript-interim';
-            interimEl.style.opacity = '0.5';
-            interimEl.style.fontStyle = 'italic';
-            transcriptContent.appendChild(interimEl);
-          }
-          interimEl.textContent = interimTranscript;
-          transcriptContent.scrollTop = transcriptContent.scrollHeight;
-        } else if (interimEl) {
-          interimEl.remove();
-        }
-      };
-
-      speechRecognition.onerror = (event) => {
-        console.warn('Speech recognition error:', event.error);
-        switch (event.error) {
-          case 'not-allowed':
-          case 'service-not-allowed':
-            micDeniedRetries++;
-            if (micDeniedRetries <= MAX_MIC_DENIED_RETRIES) {
-              console.warn(`Speech mic denied (attempt ${micDeniedRetries}/${MAX_MIC_DENIED_RETRIES}) — retrying`);
-              setTranscriptionStatus('Mic busy, retrying...', 'listening');
-              setTimeout(() => {
-                if (isTranscribing) {
-                  stopTranscription();
-                  startTranscription();
-                }
-              }, 3000);
-            } else {
-              showToast('Transcription unavailable — use manual notes instead');
-              setTranscriptionStatus('Use manual notes', 'error');
-              stopTranscription();
-            }
-            return;
-          case 'no-speech':
-            langFailCount++;
-            // If a language keeps failing, try fallback code
-            const selected = getSelectedLang();
-            const fallbacks = langFallbacks[selected];
-            if (langFailCount >= 3 && fallbacks && currentLangAttempt < fallbacks.length - 1) {
-              currentLangAttempt++;
-              console.log(`Language ${selected} struggling, trying fallback: ${fallbacks[currentLangAttempt]}`);
-              setTranscriptionStatus(`Trying ${fallbacks[currentLangAttempt]}...`, 'listening');
-              stopTranscription();
-              setTimeout(() => startTranscription(), 1000);
-              return;
-            }
-            setTranscriptionStatus('No speech detected...', 'listening');
-            break;
-          case 'network':
-            showToast('Network error — speech recognition requires internet');
-            setTranscriptionStatus('Network error', 'error');
-            stopTranscription();
-            break;
-          case 'audio-capture':
-            // Mic not available — might be in use by another app
-            setTranscriptionStatus('Mic unavailable', 'error');
-            showToast('Microphone not available — close other apps using the mic');
-            stopTranscription();
-            break;
-          case 'aborted':
-            break;
-          case 'language-not-supported':
-            showToast(`Language not supported — switching to Hindi`);
-            speechLangSelect.value = 'hi-IN';
-            currentLangAttempt = 0;
-            stopTranscription();
-            setTimeout(() => startTranscription(), 500);
-            return;
-          default:
-            setTranscriptionStatus('Error: ' + event.error, 'error');
-        }
-      };
-
-      speechRecognition.onend = () => {
-        console.log('Speech recognition ended, isTranscribing:', isTranscribing);
-        if (isTranscribing) {
-          speechRecognitionRetries++;
-          if (speechRecognitionRetries > MAX_SPEECH_RETRIES) {
-            // Too many rapid restarts — pause longer to avoid mic toggling
-            setTranscriptionStatus('Paused, resuming...', 'listening');
-            speechRecognitionRetries = 0;
-            setTimeout(() => {
-              if (isTranscribing) {
-                stopTranscription();
-                startTranscription();
-              }
-            }, 3000);
-            return;
-          }
-          // Restart after a delay to avoid mic conflict with WebRTC
-          const restartDelay = isMobile ? 1500 : 800;
-          setTimeout(() => {
-            if (isTranscribing && speechRecognition) {
-              try {
-                speechRecognition.start();
-              } catch (e) {
-                console.warn('Failed to restart speech recognition:', e);
-              }
-            }
-          }, restartDelay);
-        }
-      };
-
-      speechRecognition.start();
-      isTranscribing = true;
-      toggleTranscriptionBtn.classList.add('active');
-      toggleTranscriptionBtn.querySelector('.material-icons').textContent = 'stop';
-      showToast(`Transcription started — ${getLangLabel()}`);
-    } catch (err) {
-      console.error('Failed to start speech recognition:', err);
-      showToast('Could not start transcription: ' + err.message);
-      setTranscriptionStatus('Failed to start', 'error');
+    // Find supported audio MIME type
+    let mimeType = 'audio/webm;codecs=opus';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = 'audio/webm';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/ogg;codecs=opus';
+      }
     }
+
+    const chunks = [];
+    googleSttRecorder = new MediaRecorder(audioStream, { mimeType });
+
+    googleSttRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+
+    googleSttRecorder.onstop = async () => {
+      if (chunks.length === 0 || !isTranscribing) return;
+
+      const blob = new Blob(chunks, { type: mimeType });
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64Audio = reader.result.split(',')[1];
+        try {
+          const encoding = mimeType.includes('ogg') ? 'OGG_OPUS' : 'WEBM_OPUS';
+          const response = await fetch('/api/speech-to-text', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ audio: base64Audio, encoding }),
+          });
+
+          const data = await response.json();
+          if (data.transcript && data.transcript.trim()) {
+            const text = data.transcript.trim();
+            const detectedLang = data.languageCode || '';
+            const now = new Date();
+            const ts = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            transcriptLines.push({ time: ts, text, speaker: 'You', lang: detectedLang });
+            addTranscriptLine(ts, text, 'You', detectedLang);
+            wsSend({ type: 'transcript', text, time: Date.now(), lang: detectedLang });
+          }
+        } catch (err) {
+          console.warn('Google Cloud STT error:', err);
+        }
+
+        // Start next cycle
+        if (isTranscribing) {
+          startGoogleSttCycle(audioStream);
+        }
+      };
+      reader.readAsDataURL(blob);
+    };
+
+    googleSttRecorder.start();
+
+    // Stop after chunk duration to send for transcription
+    setTimeout(() => {
+      if (googleSttRecorder && googleSttRecorder.state === 'recording') {
+        googleSttRecorder.stop();
+      }
+    }, GOOGLE_STT_CHUNK_DURATION);
   }
 
   function stopTranscription() {
     isTranscribing = false;
-    if (speechRecognition) {
-      try { speechRecognition.stop(); } catch (e) {}
-      speechRecognition = null;
+    if (googleSttRecorder && googleSttRecorder.state === 'recording') {
+      try { googleSttRecorder.stop(); } catch (e) {}
     }
-    toggleTranscriptionBtn.classList.remove('active');
-    toggleTranscriptionBtn.querySelector('.material-icons').textContent = 'play_arrow';
-    setTranscriptionStatus('', '');
-    showBanner(false);
-    speechRecognitionRetries = 0;
+    googleSttRecorder = null;
   }
 
-  // Restart transcription when language changes
-  if (speechLangSelect) {
-    speechLangSelect.addEventListener('change', () => {
-      currentLangAttempt = 0;
-      langFailCount = 0;
-      if (isTranscribing) {
-        stopTranscription();
-        startTranscription();
-      }
-    });
-  }
-
-  function addTranscriptLine(time, text, speaker) {
-    clearTranscriptEmpty();
-    const interimEl = transcriptContent.querySelector('.transcript-interim');
-    if (interimEl) interimEl.remove();
-
-    const line = document.createElement('div');
-    line.className = 'transcript-line';
-    const speakerLabel = speaker ? `<span class="transcript-speaker">${escapeHtml(speaker)}:</span> ` : '';
-    line.innerHTML = `<span class="ts">[${escapeHtml(time)}]</span> ${speakerLabel}${escapeHtml(text)}`;
-    transcriptContent.appendChild(line);
-    transcriptContent.scrollTop = transcriptContent.scrollHeight;
-  }
-
-  toggleTranscriptionBtn.addEventListener('click', () => {
-    if (!isTranscribing) {
-      startTranscription();
-    } else {
-      stopTranscription();
-    }
-  });
-
-  // ===== Manual Transcript Input (fallback) =====
-  function addManualNote() {
-    const text = manualTranscriptInput.value.trim();
-    if (!text) return;
-    const now = new Date();
-    const ts = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    transcriptLines.push({ time: ts, text, speaker: 'You' });
-    addTranscriptLine(ts, text, 'You');
-    // Share manual notes too
-    wsSend({ type: 'transcript', text, time: Date.now(), lang: getSelectedLang() });
-    manualTranscriptInput.value = '';
-  }
-
-  addManualNoteBtn.addEventListener('click', addManualNote);
-  manualTranscriptInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') addManualNote();
-  });
-
-  // ===== Generate AI Minutes =====
-  generateMinutesBtn.addEventListener('click', async () => {
+  // ===== Process Transcript (AI Insights) =====
+  processTranscriptBtn.addEventListener('click', async () => {
     if (transcriptLines.length === 0) {
-      showToast('No transcript available. Use speech transcription or type notes manually.');
+      showToast('No transcript available yet. Wait for some conversation.');
       return;
     }
 
@@ -1257,14 +1067,19 @@ if (isRoom) {
     const secs = elapsed % 60;
     const duration = `${mins}m ${secs}s`;
 
-    // Show loading
-    generatedMinutes.innerHTML = `
-      <div class="minutes-loading">
+    // Show loading spinners in all insight cards
+    const loadingHtml = `
+      <div class="insight-loading">
         <div class="spinner"></div>
-        Generating minutes with AI...
+        <p>Processing...</p>
       </div>
     `;
-    generateMinutesBtn.disabled = true;
+    insightSummary.innerHTML = loadingHtml;
+    insightDecisions.innerHTML = loadingHtml;
+    insightActions.innerHTML = loadingHtml;
+    insightFollowups.innerHTML = loadingHtml;
+
+    processTranscriptBtn.disabled = true;
 
     try {
       const response = await fetch('/api/generate-minutes', {
@@ -1280,57 +1095,85 @@ if (isRoom) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to generate minutes');
+        throw new Error(data.error || 'Failed to generate insights');
       }
 
-      // Render markdown-like content
-      generatedMinutes.innerHTML = renderMinutes(data.minutes);
-      showToast('Meeting minutes generated!');
+      // Parse response by splitting on section headers
+      const minutesText = data.minutes || '';
+      const sections = parseInsightSections(minutesText);
+
+      // Fill each insight card
+      fillInsightCard(insightSummary, sections.summary);
+      fillInsightCard(insightDecisions, sections.decisions);
+      fillInsightCard(insightActions, sections.actions);
+      fillInsightCard(insightFollowups, sections.followups);
+
+      showToast('Meeting insights generated!');
     } catch (err) {
-      console.error('Minutes generation failed:', err);
-      generatedMinutes.innerHTML = `
-        <div class="minutes-empty">
+      console.error('Insights generation failed:', err);
+      const errorHtml = `
+        <div class="insight-empty">
           <span class="material-icons" style="color:var(--red)">error</span>
           <p>${escapeHtml(err.message)}</p>
         </div>
       `;
-      showToast('Failed to generate minutes');
+      insightSummary.innerHTML = errorHtml;
+      insightDecisions.innerHTML = errorHtml;
+      insightActions.innerHTML = errorHtml;
+      insightFollowups.innerHTML = errorHtml;
+      showToast('Failed to generate insights');
     }
 
-    generateMinutesBtn.disabled = false;
+    processTranscriptBtn.disabled = false;
   });
 
-  // Simple markdown-to-HTML renderer for minutes
-  function renderMinutes(text) {
-    return text
-      // Headers
-      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      // Bold
+  function parseInsightSections(text) {
+    const sections = { summary: '', decisions: '', actions: '', followups: '' };
+
+    // Split on ## headers
+    const summaryMatch = text.split('## Summary');
+    const afterSummary = summaryMatch.length > 1 ? summaryMatch[1] : '';
+
+    const decisionsMatch = afterSummary.split('## Decisions');
+    sections.summary = (decisionsMatch[0] || '').trim();
+    const afterDecisions = decisionsMatch.length > 1 ? decisionsMatch[1] : '';
+
+    const actionsMatch = afterDecisions.split('## Action Items');
+    sections.decisions = (actionsMatch[0] || '').trim();
+    const afterActions = actionsMatch.length > 1 ? actionsMatch[1] : '';
+
+    const followupsMatch = afterActions.split('## Follow-ups');
+    sections.actions = (followupsMatch[0] || '').trim();
+    sections.followups = (followupsMatch.length > 1 ? followupsMatch[1] : '').trim();
+
+    return sections;
+  }
+
+  function fillInsightCard(cardEl, content) {
+    const parentCard = cardEl.closest('.insight-card');
+    if (!content) {
+      cardEl.innerHTML = `
+        <div class="insight-empty">
+          <span class="material-icons">auto_awesome</span>
+          <p>No data found for this section</p>
+        </div>
+      `;
+      return;
+    }
+
+    // Simple markdown rendering for card content
+    const html = content
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      // Tables
-      .replace(/^\|(.+)\|$/gm, (match) => {
-        const cells = match.split('|').filter(c => c.trim() !== '');
-        const isHeader = cells.every(c => /^[\s-:]+$/.test(c));
-        if (isHeader) return ''; // separator row
-        const tag = 'td';
-        const row = cells.map(c => `<${tag}>${c.trim()}</${tag}>`).join('');
-        return `<tr>${row}</tr>`;
-      })
-      // Wrap consecutive tr rows in table
-      .replace(/((<tr>.*<\/tr>\n?)+)/g, '<table>$1</table>')
-      // Make first row headers
-      .replace(/<table><tr>(.*?)<\/tr>/g, (match, row) => {
-        const headerRow = row.replace(/<td>/g, '<th>').replace(/<\/td>/g, '</th>');
-        return `<table><tr>${headerRow}</tr>`;
-      })
-      // Bullet points
+      .replace(/^- \[ \] (.+)$/gm, '<li class="action-item">$1</li>')
       .replace(/^- (.+)$/gm, '<li>$1</li>')
-      .replace(/((<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
-      // Paragraphs (lines that aren't already wrapped)
-      .replace(/^(?!<[hultdp]|<\/|<tr|<table)(.+)$/gm, '<p>$1</p>')
-      // Clean up empty paragraphs
+      .replace(/((<li[^>]*>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
+      .replace(/^(?!<[ul]|<\/|<li)(.+)$/gm, '<p>$1</p>')
       .replace(/<p>\s*<\/p>/g, '');
+
+    cardEl.innerHTML = html;
+    if (parentCard) {
+      parentCard.classList.add('card-filled');
+    }
   }
 
   // ===== Handle page visibility =====
@@ -1361,22 +1204,21 @@ if (isRoom) {
     updateGridLayout();
 
     // Auto-start transcription only after mic is confirmed working
-    if (speechSupported) {
-      const waitForMic = () => {
-        if (localStream && localStream.getAudioTracks().length > 0 && localStream.getAudioTracks()[0].enabled) {
-          // Mic is ready — start transcription after a settle delay
-          setTimeout(() => {
-            startTranscription();
-          }, 2000);
-        } else {
-          // Mic not ready yet — retry in 2s, give up after 15s
-          if (Date.now() - startTime < 15000) {
-            setTimeout(waitForMic, 2000);
-          }
+    // Works with both Web Speech API (Chrome/Edge) and Google Cloud fallback (Safari/Firefox)
+    const waitForMic = () => {
+      if (localStream && localStream.getAudioTracks().length > 0 && localStream.getAudioTracks()[0].enabled) {
+        // Mic is ready — start transcription after a settle delay
+        setTimeout(() => {
+          startTranscription();
+        }, 2000);
+      } else {
+        // Mic not ready yet — retry in 2s, give up after 15s
+        if (Date.now() - startTime < 15000) {
+          setTimeout(waitForMic, 2000);
         }
-      };
-      setTimeout(waitForMic, 3000);
-    }
+      }
+    };
+    setTimeout(waitForMic, 3000);
   }
 
   initRoom();

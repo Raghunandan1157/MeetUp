@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const http = require('http');
 const https = require('https');
@@ -93,7 +95,7 @@ app.post('/api/generate-minutes', async (req, res) => {
         messages: [
           {
             role: 'system',
-            content: 'You are a meeting minutes assistant. Generate concise, professional, and actionable meeting minutes from transcripts. The transcript may be in Kannada, Hindi, Telugu, Tamil, or other Indian languages. Understand the content regardless of language and ALWAYS generate the minutes in English. Translate any non-English content to English in the minutes.'
+            content: 'You are a meeting minutes assistant. Generate concise, professional, and actionable meeting minutes from transcripts. The transcript may be in Kannada, Hindi, Telugu, Tamil, or other Indian languages. Understand the content regardless of language and ALWAYS generate the minutes in English. Translate any non-English content to English in the minutes. You MUST use the exact section delimiters specified so the output can be parsed into separate cards.'
           },
           {
             role: 'user',
@@ -105,26 +107,31 @@ Duration: ${duration || 'N/A'}
 TRANSCRIPT:
 ${transcript}
 
-Generate meeting minutes in the following format:
+Generate meeting minutes using EXACTLY these section headers as delimiters (the client parses on these exact strings):
 
-## Meeting Summary
-A brief 2-3 sentence summary of what was discussed.
+## Summary
+A brief 2-3 sentence summary of what was discussed and key outcomes.
 
-## Key Discussion Points
-- Bullet points of main topics discussed
-
-## Decisions Made
-- Any decisions that were agreed upon
+## Decisions
+- Each decision as a bullet point
+- Include who agreed and any conditions
 
 ## Action Items
-| # | Action Item | Owner | Deadline |
-|---|------------|-------|----------|
-| 1 | Description | Person | Date |
+- [ ] Action description -- Owner -- Deadline
+- [ ] Action description -- Owner -- Deadline
 
-## Follow-up Items
+## Follow-ups
 - Items that need further discussion or follow-up
+- Unresolved questions or topics for next meeting
 
-Keep the minutes concise, professional, and actionable. If the transcript is short or unclear, do your best to extract meaningful information. If no clear deadlines were mentioned, suggest reasonable ones.`
+RULES:
+- Use EXACTLY the four section headers above: ## Summary, ## Decisions, ## Action Items, ## Follow-ups
+- Do NOT add any other ## headers
+- Keep each section concise (2-5 bullet points max)
+- Action Items MUST use the "- [ ] description -- owner -- deadline" format
+- If the transcript is short or unclear, do your best to extract meaningful information
+- If no clear deadlines were mentioned, suggest reasonable ones
+- Always generate in English regardless of transcript language`
           }
         ],
       }),
@@ -141,6 +148,62 @@ Keep the minutes concise, professional, and actionable. If the transcript is sho
   } catch (err) {
     console.error('Mistral API error:', err.message);
     res.status(500).json({ error: 'Failed to generate minutes: ' + err.message });
+  }
+});
+
+// ===== API: Speech-to-Text (Google Cloud proxy with auto language detection) =====
+app.post('/api/speech-to-text', async (req, res) => {
+  const { audio, encoding, sampleRateHertz } = req.body;
+  if (!audio) {
+    return res.status(400).json({ error: 'No audio data provided' });
+  }
+
+  const apiKey = process.env.GOOGLE_SPEECH_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'GOOGLE_SPEECH_API_KEY not configured on server' });
+  }
+
+  try {
+    const response = await fetch(`https://speech.googleapis.com/v1/speech:recognize?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: {
+          encoding: encoding || 'WEBM_OPUS',
+          sampleRateHertz: sampleRateHertz || 48000,
+          languageCode: 'en-IN',
+          alternativeLanguageCodes: [
+            'kn-IN', 'hi-IN', 'te-IN', 'ta-IN', 'ml-IN',
+            'mr-IN', 'gu-IN', 'bn-IN', 'pa-IN', 'ur-IN', 'en-US',
+          ],
+          enableAutomaticPunctuation: true,
+        },
+        audio: {
+          content: audio,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      throw new Error(`Google Speech API error ${response.status}: ${errBody}`);
+    }
+
+    const data = await response.json();
+    let transcript = '';
+    let detectedLanguage = 'en-IN';
+    if (data.results && data.results.length > 0) {
+      transcript = data.results
+        .map(r => r.alternatives && r.alternatives[0] ? r.alternatives[0].transcript : '')
+        .join(' ');
+      // Google returns languageCode on each result when alternativeLanguageCodes is used
+      detectedLanguage = data.results[0].languageCode || 'en-IN';
+    }
+
+    res.json({ transcript, languageCode: detectedLanguage });
+  } catch (err) {
+    console.error('Google Speech API error:', err.message);
+    res.status(500).json({ error: 'Speech-to-text failed: ' + err.message });
   }
 });
 

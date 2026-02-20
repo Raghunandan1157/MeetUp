@@ -32,96 +32,173 @@
     </div>
   </header>
 
-  <!-- Transcript Live Banner (left side) -->
-  <div id="transcript-banner" class="transcript-banner">
-    <div class="banner-pulse"></div>
-    <span class="material-icons" style="font-size:16px">subtitles</span>
-    <span id="banner-text">Transcription active</span>
+  <!-- Live Transcript Strip -->
+  <div id="transcript-strip" class="transcript-strip">
+    <div class="transcript-strip-inner">
+      <div class="transcript-strip-indicator">
+        <span class="strip-pulse"></span>
+        <span class="material-icons" style="font-size:16px">subtitles</span>
+      </div>
+      <div id="transcript-strip-content" class="transcript-strip-content">
+        <span class="transcript-strip-placeholder">Live transcript will appear here...</span>
+      </div>
+      <div id="transcript-lang-badges" class="transcript-lang-badges">
+        <!-- Auto-detected language badges appear here -->
+      </div>
+    </div>
   </div>
 
-  <!-- Video Grid Area -->
-  <main class="video-area">
-    <div id="video-grid" class="video-grid grid-1">
-      <!-- Local video tile -->
-      <div class="video-tile" id="local-tile" data-peer="local">
-        <video id="local-video" autoplay muted playsinline></video>
-        <div class="tile-overlay">
-          <span class="tile-name">You</span>
-          <span class="tile-mute-icon material-icons" id="local-mute-icon" style="display:none">mic_off</span>
-        </div>
+  <!-- Main Three-Column Area Wrapper -->
+  <div class="main-content-wrapper">
+    <!-- Left Panel: Action Plan -->
+    <aside id="left-panel" class="side-panel left-panel">
+      <div class="panel-header">
+        <span class="material-icons">assignment</span>
+        <h3>Action Plan</h3>
+        <button id="toggle-left-panel" class="icon-btn panel-toggle-btn" title="Toggle Action Plan">
+          <span class="material-icons">chevron_left</span>
+        </button>
       </div>
-      <!-- Remote tiles appended here -->
-    </div>
-  </main>
-
-  <!-- Minutes Side Panel -->
-  <aside id="minutes-panel" class="minutes-panel">
-    <div class="chat-header">
-      <h3>Meeting Minutes</h3>
-      <button id="close-minutes" class="icon-btn" title="Close minutes">
-        <span class="material-icons">close</span>
-      </button>
-    </div>
-    <div class="minutes-body">
-      <div id="transcript-section" class="transcript-section">
-        <div class="transcript-header">
-          <span class="material-icons" style="font-size:18px">mic</span>
-          <span>Live Transcript</span>
-          <span id="transcription-status" class="transcription-status"></span>
-          <button id="toggle-transcription" class="transcript-toggle-btn" title="Start transcription">
-            <span class="material-icons">play_arrow</span>
-          </button>
-        </div>
-        <div class="language-selector">
-          <label for="speech-lang">
-            <span class="material-icons" style="font-size:16px">translate</span>
-            Language:
-          </label>
-          <select id="speech-lang">
-            <option value="kn-IN">ಕನ್ನಡ (Kannada)</option>
-            <option value="hi-IN">हिन्दी (Hindi)</option>
-            <option value="en-IN">English (India)</option>
-            <option value="te-IN">తెలుగు (Telugu)</option>
-            <option value="ta-IN">தமிழ் (Tamil)</option>
-            <option value="ml-IN">മലയാളം (Malayalam)</option>
-            <option value="mr-IN">मराठी (Marathi)</option>
-            <option value="gu-IN">ગુજરાતી (Gujarati)</option>
-            <option value="bn-IN">বাংলা (Bengali)</option>
-            <option value="pa-IN">ਪੰਜਾਬੀ (Punjabi)</option>
-            <option value="ur-IN">اردو (Urdu)</option>
-            <option value="en-US">English (US)</option>
-          </select>
-          <span class="lang-hint">Speak clearly. If a language doesn't work, try Hindi.</span>
-        </div>
-        <div id="transcript-content" class="transcript-content">
-          <div class="transcript-empty">
-            <span class="material-icons">subtitles</span>
-            <p>Click play to start live transcription.<br><strong>Requires Google Chrome or Edge browser.</strong><br>Not supported in Safari or Samsung Internet.<br>You can also type notes manually below.</p>
+      <div class="panel-cards">
+        <!-- Meeting Agenda Card -->
+        <div class="plan-card" data-card="agenda">
+          <div class="plan-card-header">
+            <span class="material-icons plan-card-icon">event_note</span>
+            <h4>Meeting Agenda</h4>
+          </div>
+          <div class="plan-card-body">
+            <textarea id="card-agenda" class="plan-card-input" placeholder="Enter meeting agenda items..." rows="3"></textarea>
           </div>
         </div>
-        <div class="transcript-manual-input">
-          <input type="text" id="manual-transcript-input" placeholder="Type notes manually..." autocomplete="off">
-          <button id="add-manual-note" class="icon-btn" title="Add note">
-            <span class="material-icons">add</span>
-          </button>
-        </div>
-      </div>
-      <div id="generated-minutes" class="generated-minutes">
-        <div class="minutes-empty">
-          <span class="material-icons">description</span>
-          <p>AI-generated meeting minutes will appear here after you click "Generate Minutes".</p>
-        </div>
-      </div>
-    </div>
-    <div class="minutes-actions">
-      <button id="generate-minutes-btn" class="btn btn-primary" style="padding:10px 20px; font-size:13px;">
-        <span class="material-icons" style="font-size:18px">auto_awesome</span>
-        Generate Minutes
-      </button>
-    </div>
-  </aside>
 
-  <!-- Chat Side Panel -->
+        <!-- Discussion Topics Card -->
+        <div class="plan-card" data-card="topics">
+          <div class="plan-card-header">
+            <span class="material-icons plan-card-icon">forum</span>
+            <h4>Discussion Topics</h4>
+          </div>
+          <div class="plan-card-body">
+            <textarea id="card-topics" class="plan-card-input" placeholder="List discussion topics..." rows="3"></textarea>
+          </div>
+        </div>
+
+        <!-- Goals / Objectives Card -->
+        <div class="plan-card" data-card="goals">
+          <div class="plan-card-header">
+            <span class="material-icons plan-card-icon">flag</span>
+            <h4>Goals / Objectives</h4>
+          </div>
+          <div class="plan-card-body">
+            <textarea id="card-goals" class="plan-card-input" placeholder="Define meeting goals..." rows="3"></textarea>
+          </div>
+        </div>
+
+        <!-- Participants Card -->
+        <div class="plan-card" data-card="participants">
+          <div class="plan-card-header">
+            <span class="material-icons plan-card-icon">group</span>
+            <h4>Participants</h4>
+          </div>
+          <div class="plan-card-body">
+            <textarea id="card-participants" class="plan-card-input" placeholder="List participants and roles..." rows="3"></textarea>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Center: Video Grid -->
+    <section class="video-area">
+      <div id="video-grid" class="video-grid grid-1">
+        <!-- Local video tile -->
+        <div class="video-tile" id="local-tile" data-peer="local">
+          <video id="local-video" autoplay muted playsinline></video>
+          <div class="tile-overlay">
+            <span class="tile-name">You</span>
+            <span class="tile-mute-icon material-icons" id="local-mute-icon" style="display:none">mic_off</span>
+          </div>
+        </div>
+        <!-- Remote tiles appended here -->
+      </div>
+    </section>
+
+    <!-- Right Panel: Meeting Insights -->
+    <aside id="right-panel" class="side-panel right-panel">
+      <div class="panel-header">
+        <span class="material-icons">insights</span>
+        <h3>Meeting Insights</h3>
+        <button id="toggle-right-panel" class="icon-btn panel-toggle-btn" title="Toggle Meeting Insights">
+          <span class="material-icons">chevron_right</span>
+        </button>
+      </div>
+      <div class="panel-cards">
+        <!-- Meeting Summary Card -->
+        <div class="insight-card" data-card="summary">
+          <div class="insight-card-header">
+            <span class="material-icons insight-card-icon">summarize</span>
+            <h4>Meeting Summary</h4>
+          </div>
+          <div class="insight-card-body" id="insight-summary">
+            <div class="insight-empty">
+              <span class="material-icons">auto_awesome</span>
+              <p>AI summary will appear after processing</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Key Decisions Card -->
+        <div class="insight-card" data-card="decisions">
+          <div class="insight-card-header">
+            <span class="material-icons insight-card-icon">gavel</span>
+            <h4>Key Decisions</h4>
+          </div>
+          <div class="insight-card-body" id="insight-decisions">
+            <div class="insight-empty">
+              <span class="material-icons">auto_awesome</span>
+              <p>Decisions will be extracted from transcript</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Items Card -->
+        <div class="insight-card" data-card="actions">
+          <div class="insight-card-header">
+            <span class="material-icons insight-card-icon">task_alt</span>
+            <h4>Action Items</h4>
+          </div>
+          <div class="insight-card-body" id="insight-actions">
+            <div class="insight-empty">
+              <span class="material-icons">auto_awesome</span>
+              <p>Action items will be listed here</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Follow-up Items Card -->
+        <div class="insight-card" data-card="followups">
+          <div class="insight-card-header">
+            <span class="material-icons insight-card-icon">next_plan</span>
+            <h4>Follow-up Items</h4>
+          </div>
+          <div class="insight-card-body" id="insight-followups">
+            <div class="insight-empty">
+              <span class="material-icons">auto_awesome</span>
+              <p>Follow-ups will appear after processing</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Process Transcript Button -->
+      <div class="panel-actions">
+        <button id="process-transcript-btn" class="btn btn-primary">
+          <span class="material-icons">auto_awesome</span>
+          Process Transcript
+        </button>
+      </div>
+    </aside>
+  </div> <!-- End main-content-wrapper -->
+
+  <!-- Chat Side Panel (overlay) -->
   <aside id="chat-panel" class="chat-panel">
     <div class="chat-header">
       <h3>In-call messages</h3>
@@ -152,7 +229,7 @@
       <button id="toggle-cam" class="control-btn active" title="Toggle camera">
         <span class="material-icons">videocam</span>
       </button>
-      <div id="share-screen-wrapper" class="control-btn-wrapper">
+      <div id="share-screen-wrapper" class="control-btn-wrapper hide-on-mobile">
         <button id="share-screen" class="control-btn" title="Share screen">
           <span class="material-icons">present_to_all</span>
         </button>
@@ -160,13 +237,10 @@
       <button id="record-btn" class="control-btn" title="Record meeting">
         <span class="material-icons">fiber_manual_record</span>
       </button>
-      <button id="toggle-minutes" class="control-btn" title="Meeting minutes">
-        <span class="material-icons">description</span>
-      </button>
       <button id="toggle-chat" class="control-btn" title="Toggle chat">
         <span class="material-icons">chat</span>
       </button>
-      <button id="copy-link" class="control-btn" title="Copy meeting link">
+      <button id="copy-link" class="control-btn hide-on-mobile" title="Copy meeting link">
         <span class="material-icons">link</span>
       </button>
       <button id="leave-btn" class="control-btn leave" title="Leave meeting">
